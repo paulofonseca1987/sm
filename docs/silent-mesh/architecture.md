@@ -45,6 +45,7 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D29 | Personal channels + promotion | Every member gets a **private personal channel** (membership of one, plus their agents) to organize their own threads and files, and can **promote** a private thread's work into a team channel — files transplant, the private conversation stays behind — where others review, comment, and fork it |
 | D30 | Privacy Gate | Any privacy-weakening movement (personal → team promotion, clone into a looser tier) passes a mandatory gate: **local models** (owned tier only) summarize the conversation, analyze outgoing content, and suggest what must stay private; the user reviews and approves obfuscations before the operation executes |
 | D31 | Content Seals | The owner can select any word, value, or component and **seal it at a minimum tier**; the raw value is replaced by an opaque token and stored encrypted, and the system keeps it redacted — in rendering, inference, movement, and sync — in every context whose tier is looser than the seal's. **A seal applies across the whole workspace**: every existing occurrence is swept, and new occurrences are caught at ingestion |
+| D32 | Deep seal | An optional, harsher sealing level that **rewrites git history retroactively** to expunge the raw value from every historic commit — the leak-correction mechanism. Owner-only, heavily audited, and deliberately costly to invoke so it stays rare |
 
 ## 2. The core mapping
 
@@ -271,6 +272,26 @@ starts with fresh data, no migration of legacy rows is needed.
     seal's label and tier.
   Sealing and unsealing are owner-only, audit-logged actions; loosening a seal's
   tier is itself a privacy-weakening operation and passes the gate.
+- **Deep seal (D32)**: a standard seal protects content going forward but leaves
+  the raw value in pre-seal git history. When the owner is correcting a prior
+  leak, they can escalate to a deep seal, which additionally **rewrites history
+  retroactively**: a filter pass over every affected channel repo replaces the
+  literal in all historic blobs with the token (and purges matching blobs from
+  the blob store). The operational consequences are real and handled, not
+  hidden:
+  - rewriting changes commit hashes from the first occurrence forward, so the
+    server maintains an **old→new SHA remap table** — checkpoints, fork points,
+    and promotion references resolve through it, and immutable signed events
+    that name old SHAs (git/push events) stay resolvable via the same map;
+  - clients holding affected repos are forced to re-sync: the vault purges the
+    stale objects and re-fetches (offline devices comply on next connect —
+    best-effort by nature, stated plainly);
+  - in-flight worktrees are rebased onto the rewritten history.
+  A deep seal is owner-only, requires explicit confirmation of its blast radius
+  (repos touched, commits rewritten, clients invalidated), and is prominently
+  audit-logged. It corrects the *workspace record*; it cannot recall what a
+  looser backend or an unsynced device already received before the seal — the
+  standard seal's ingestion guards exist so it rarely comes to that.
 - **Audit**: every action is already a signed event; the relay additionally keeps a
   Buzz-style hash-chained audit log so tampering with SQLite is evident.
 

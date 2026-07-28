@@ -230,6 +230,12 @@ regeneration request goes out scrubbed.
 
 - Key lifecycle: multi-device key transfer (QR/manual), rotation and revocation
   story, server backup/restore drills, LUKS + deployment guide.
+- **Deep seal (D32)**: retroactive history purge for leak correction — filter
+  pass across affected repos + blob store, old→new SHA remap table (checkpoints,
+  fork points, and event references resolve through it), forced client re-sync
+  with vault purge of stale objects, in-flight worktree rebase, blast-radius
+  confirmation UI, and a rehearsed drill (seed a leak, deep-seal it, verify every
+  surface).
 - Read-hiding within a channel via filtered mirror repos (the v1 boundary lift), if
   still wanted once channel-granularity has been lived with.
 - Harness customization surface expansion (skills/plugins), informed by v1 usage.
@@ -249,6 +255,7 @@ regeneration request goes out scrubbed.
 | Copilot quality on small models (refinement, clarifying questions, routing) | it drafts and routes, humans confirm before dispatch; routing rules are policy code, not model output, so a weak copilot degrades UX, never privacy |
 | Privacy Gate redaction assist misses secrets (small-model false negatives) | model suggestions are paired with deterministic secret scanners; the human review is the decision point, the model only assists; audit records gate outcomes without private content |
 | Seal tokens must survive agent edits and git merges | tokens are plain-text markers robust to diff/merge; a pre-receive lint rejects malformed or duplicated tokens; agents in looser contexts only ever see placeholders, so they cannot leak what they never held |
+| Deep-seal history rewrites invalidate clones and SHA references | old→new SHA remap table kept server-side; forced client re-sync purges stale vault objects; worktrees rebased; owner-only with blast-radius confirmation, so it stays a rare correction tool, not a routine one |
 | Own-harness scope creep | v1 = one agent loop + existing tools + per-user profiles; plugins/skills deferred to Phase 7 |
 | Git can't hide paths within one repo | scoped out of v1 explicitly (architecture §6); channel granularity is the read boundary, filtered mirrors in Phase 7 |
 | secp256k1 keys can't live in the Secure Enclave | SE-wrapped master key + Keychain biometric access control (architecture §10); documented rather than discovered late |
@@ -278,8 +285,9 @@ regeneration request goes out scrubbed.
 9. Privacy Gate obfuscation mechanics: placeholder tokens vs generalized rewrites,
    and whether file redactions rewrite only the transplanted copy's history or
    also its future merges back.
-10. Content Seal history semantics: sealing rewrites content going forward, but
-    the raw value remains in pre-seal git history within channels at the seal's
-    tier or above — is that accepted (history is already tier-bound), or do
-    high-value seals warrant a history rewrite?
+10. Deep-seal mechanics detail: rewrite tooling (git-filter-repo vs custom
+    filter), whether the SHA remap table is retained forever or expires, and how
+    redaction envelopes interact with events that quoted the leaked value
+    verbatim. (The history-semantics question is settled by D32: standard seals
+    are forward-looking; deep seals purge history.)
 11. Forum-style channels (Buzz kinds 45001/45003) — not in v1.
