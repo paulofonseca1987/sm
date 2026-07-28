@@ -44,6 +44,7 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D28 | Thread archiving | T3's thread archiving (experimental in current T3 nightlies) becomes a **core lifecycle state** alongside settled/snoozed — signed lifecycle events; archived threads leave default views but stay searchable; losing fork variations archive rather than delete |
 | D29 | Personal channels + promotion | Every member gets a **private personal channel** (membership of one, plus their agents) to organize their own threads and files, and can **promote** a private thread's work into a team channel — files transplant, the private conversation stays behind — where others review, comment, and fork it |
 | D30 | Privacy Gate | Any privacy-weakening movement (personal → team promotion, clone into a looser tier) passes a mandatory gate: **local models** (owned tier only) summarize the conversation, analyze outgoing content, and suggest what must stay private; the user reviews and approves obfuscations before the operation executes |
+| D31 | Content Seals | The owner can select any word, value, or component and **seal it at a minimum tier**; the raw value is replaced by an opaque token and stored encrypted, and the system keeps it redacted — in rendering, inference, movement, and sync — in every context whose tier is looser than the seal's |
 
 ## 2. The core mapping
 
@@ -162,7 +163,7 @@ kinds in a dedicated 47000–47999 block):
 | 20000–29999 | Ephemeral: typing, presence, **agent token-stream deltas** | NIP-16 |
 | 45001 / 45003 | Forum post / reply (if forum channels are wanted later) | Buzz |
 | 46001–46012 | Workflow/approval state (46011 = approval) | Buzz |
-| 47000–47999 | Silent Mesh: thread lifecycle (incl. settled/snoozed/**archived**), thread fork, **thread promotion**, turn/activity, proposed plan, checkpoint ref, artifact published, **anchored comment**, **inference job queued/dispatched/completed**, sync marker, ACL change notice, usage summary (optional visibility of metering) | new |
+| 47000–47999 | Silent Mesh: thread lifecycle (incl. settled/snoozed/**archived**), thread fork, **thread promotion**, turn/activity, proposed plan, checkpoint ref, artifact published, **anchored comment**, **inference job queued/dispatched/completed**, **content seal**, sync marker, ACL change notice, usage summary (optional visibility of metering) | new |
 
 Two details worth calling out:
 
@@ -237,6 +238,27 @@ starts with fresh data, no migration of legacy rows is needed.
   4. Only after this explicit review does the operation execute. The audit log
      records that the gate ran and the decision shape (counts, hashes) — never
      the private content itself.
+- **Content Seals (D31)**: the owner selects any word, value, or component — an
+  API key, a client's name, a salary table, a section of an artifact — and seals
+  it at a minimum tier. Sealing **rewrites the content in place**: a commit swaps
+  the selected value for an opaque token, and the raw value moves into the server
+  secret store, encrypted. From then on the token resolves to the real value only
+  in contexts at least as strict as the seal:
+  - **rendering** — the client viewer shows the value in a channel at or above
+    the seal's tier, and an unresolvable `[sealed: label]` placeholder anywhere
+    looser;
+  - **inference** — the gateway resolves seals only when the target backend meets
+    the seal's tier, and additionally scrubs known sealed literals from any
+    outbound payload below their tier (defense-in-depth for copies that leaked
+    into prose before sealing);
+  - **movement** — the Privacy Gate treats sealed content as *mandatory*
+    redactions: unlike ordinary suggestions, they cannot be accepted across a
+    downgrade;
+  - **sync** — repo files carry tokens, never raw values, so a synced device
+    holds nothing extra to leak; resolution happens in-app, tier-checked, on
+    demand.
+  Sealing and unsealing are owner-only, audit-logged actions; loosening a seal's
+  tier is itself a privacy-weakening operation and passes the gate.
 - **Audit**: every action is already a signed event; the relay additionally keeps a
   Buzz-style hash-chained audit log so tampering with SQLite is evident.
 
@@ -285,6 +307,9 @@ starts with fresh data, no migration of legacy rows is needed.
 - **Regenerate-with-AI**: a comment/selection can be escalated to a work thread —
   the anchor + quoted fragment becomes the prompt context, the thread's diff comes
   back as a proposal in the channel.
+- **Seal-from-selection**: for the owner, the same selection mechanics offer
+  "seal at tier…" (D31) — the viewer renders sealed regions resolved or as
+  placeholders according to the viewing channel's tier.
 - Agents keep self-inspection: the MCP preview toolkit drives a headless Chromium on
   the server (replacing T3's desktop-webview automation), so an agent can screenshot
   and verify the artifact it just produced.
@@ -356,6 +381,11 @@ counts, persisted and projected into usage summaries the owner can query (CLI an
 client admin screens); per-user budgets/limits are owner-settable. Vendor
 subscription usage is metered from harness-reported counts (flagged self-reported)
 and costs the community nothing; client-local usage is on-device and unmetered.
+
+The gateway is also the enforcement point for **Content Seals** (§6, D31): seal
+tokens in outbound payloads resolve only when the target backend meets the seal's
+tier, and known sealed literals are scrubbed from anything routed below it —
+checked per request, like the tier policy itself.
 
 ### Prompt Copilot and the inference queue (D25)
 
@@ -453,7 +483,8 @@ client reuses everything below the view layer:
   artifact viewer with selection/comment/regenerate, the prompt-copilot surface
   (push-to-talk intent capture, refinement dialogue, job queue with routing
   visibility), the Privacy Gate review flow (generated summary, flagged spans,
-  per-item obfuscation approval), sync & conflict UI, member/ACL admin,
+  per-item obfuscation approval), owner content-seal controls (select → seal at
+  tier, seal registry), sync & conflict UI, member/ACL admin,
   vendor-subscription linking, and usage/metering dashboards for the owner.
 
 Since the web console is removed (D10), the **admin CLI is the fallback surface**

@@ -135,6 +135,12 @@ Phase 2 protocol has stabilized.
   Phase 2); user-approved obfuscations applied to the outgoing copy only; gate
   inference is pinned to the owned tier in the router — it can never route
   remotely regardless of profile or channel settings.
+- **Content Seals (D31)**: owner-managed seal registry (raw values encrypted in
+  the secret store); sealing rewrites content in place (commit swapping value for
+  token); tier-checked token resolution in relay rendering and gateway inference
+  paths; outbound scrubbing of sealed literals below their tier; gate integration
+  as mandatory, non-overridable redactions; a pre-receive lint rejecting
+  malformed or duplicated seal tokens.
 
 **Exit**: in an `owned-only` channel with the server's WAN disconnected, a member
 speaks a rough request; the copilot (server GPUs) refines it, asks one clarifying
@@ -147,8 +153,10 @@ clones an `owned-only` channel into an `open` one (repo forked, fresh stream)
 while a non-owner's clone attempt is refused. Promoting a private thread into an
 `open` channel triggers the Privacy Gate: a locally generated summary, flagged
 spans (model + scanners), and per-item obfuscation approval — with the gate's own
-inference verifiably never leaving owned hardware. The owner's usage query shows
-per-user totals broken down by tier and backend.
+inference verifiably never leaving owned hardware. A value sealed at `private`
+resolves inside the TEE-routed request, arrives scrubbed in any vendor-routed
+request, and renders as a placeholder in the `open` channel. The owner's usage
+query shows per-user totals broken down by tier and backend.
 
 ## Phase 4 — Swift macOS client MVP
 
@@ -200,13 +208,18 @@ the right tier, and conflicts (one seeded deliberately) resolve through the UI.
   `(channel, path, blob hash, anchor)`, re-anchoring on file change.
 - Regenerate-with-AI: selection/comment escalates to a work thread carrying the
   anchor context; resulting diff returns as a proposal in the channel.
+- Seal-from-selection (D31): the owner's selection menu gains "seal at tier…";
+  seal-aware rendering in the viewer and file browser (resolved vs placeholder by
+  viewing channel's tier); seal registry management UI.
 - Server-side headless Chromium for the agent MCP preview toolkit (agents verify
   their own artifacts again).
 
 **Exit**: agent produces an HTML report; a member selects a chart, comments, and
 requests regeneration; a second member sees the anchored comment on the exact
 selection; the regenerated artifact lands as a new version with the comment
-history intact.
+history intact. The owner seals a figure in the report at `private`; in an `open`
+clone of the channel the same region renders as a placeholder, and a vendor-routed
+regeneration request goes out scrubbed.
 
 ## Phase 7 — Hardening and iOS
 
@@ -230,6 +243,7 @@ history intact.
 | Per-user vendor subscription auth on the server (OAuth flows, token refresh, ToS drift) | mirrors Buzz's proven pattern; credentials isolated per member; metering is self-reported by design, not proxied |
 | Copilot quality on small models (refinement, clarifying questions, routing) | it drafts and routes, humans confirm before dispatch; routing rules are policy code, not model output, so a weak copilot degrades UX, never privacy |
 | Privacy Gate redaction assist misses secrets (small-model false negatives) | model suggestions are paired with deterministic secret scanners; the human review is the decision point, the model only assists; audit records gate outcomes without private content |
+| Seal tokens must survive agent edits and git merges | tokens are plain-text markers robust to diff/merge; a pre-receive lint rejects malformed or duplicated tokens; agents in looser contexts only ever see placeholders, so they cannot leak what they never held |
 | Own-harness scope creep | v1 = one agent loop + existing tools + per-user profiles; plugins/skills deferred to Phase 7 |
 | Git can't hide paths within one repo | scoped out of v1 explicitly (architecture §6); channel granularity is the read boundary, filtered mirrors in Phase 7 |
 | secp256k1 keys can't live in the Secure Enclave | SE-wrapped master key + Keychain biometric access control (architecture §10); documented rather than discovered late |
@@ -259,4 +273,8 @@ history intact.
 9. Privacy Gate obfuscation mechanics: placeholder tokens vs generalized rewrites,
    and whether file redactions rewrite only the transplanted copy's history or
    also its future merges back.
-10. Forum-style channels (Buzz kinds 45001/45003) — not in v1.
+10. Content Seal history semantics: sealing rewrites content going forward, but
+    the raw value remains in pre-seal git history within channels at the seal's
+    tier or above — is that accepted (history is already tier-bound), or do
+    high-value seals warrant a history rewrite?
+11. Forum-style channels (Buzz kinds 45001/45003) — not in v1.
