@@ -39,6 +39,7 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D23 | Non-private inference | Uses each member's **own Claude Code / Codex / Grok subscription**, authenticated per user the way Buzz agents do (the vendor CLI's own login flow; credentials held per member in the server secret store) |
 | D24 | Channel privacy policy | Every channel declares a minimum privacy tier — e.g. a channel can forbid non-private inference entirely (generalizes D18's airgapped flag) |
 | D25 | Prompt Copilot | A private local model (client machine, or server GPUs when online) that sees the task's files, takes voice or text intent, refines the prompt, asks clarifying questions, and queues the job for the most adequate model within channel policy |
+| D26 | Immutable channel tier | A channel's privacy tier is **fixed at creation and never changes**. Moving work to a different tier = the **owner (and only the owner) clones the channel** with a new tier — the repo forks, the conversation stays behind |
 
 ## 2. The core mapping
 
@@ -252,11 +253,26 @@ complexity — and routed accordingly:
 | **Private** — owned hardware + attested TEE | same as owned | **TEE-based confidential inference provider** (D22) |
 | **Open** — non-private allowed | The member's own vendor subscription | The member's own Claude Code / Codex / Grok subscription (D23) |
 
-**Channel privacy policy (D24)**: each channel declares its minimum tier —
-`owned-only`, `private`, or `open`. The gateway router refuses any route below the
-channel's tier, so e.g. a channel marked `private` can never see a vendor
-subscription used, regardless of user or agent preference. `owned-only` is the
-airgapped mode of D18. Users choose routes freely *within* what the channel allows.
+**Channel privacy policy (D24/D26)**: each channel declares its minimum tier —
+`owned-only`, `private`, or `open` — **at creation, immutably**. The gateway router
+refuses any route below the channel's tier, so e.g. a channel marked `private` can
+never see a vendor subscription used, regardless of user or agent preference.
+`owned-only` is the airgapped mode of D18. Users choose routes freely *within* what
+the channel allows.
+
+To move work to a different tier, the **owner — and only the owner — clones the
+channel** with the new tier:
+
+- the new channel gets a fork of the repo (full git history) and, by default, the
+  membership roster (adjustable after);
+- the conversation does **not** transfer — signed events are authored against the
+  original channel and cannot be re-signed, so the clone starts a fresh stream
+  carrying a provenance link to its origin;
+- queued inference jobs never migrate; they are re-queued under the clone's policy.
+
+Owner-only is deliberate: cloning is the single operation that can re-tier content
+(e.g. lifting formerly airgapped files into an `open` channel where vendors can see
+them), so it sits exclusively with the person accountable for that call.
 
 ### Model gateway
 
@@ -411,4 +427,6 @@ by the gateway router:
 
 The channel policy is the owner's single lever: set a channel `owned-only` or
 `private` and no member, agent profile, or copilot routing decision can leak its
-content below that line.
+content below that line. And because tiers are immutable (D26), the guarantee is
+permanent for the channel's lifetime — the only path that re-tiers content is an
+explicit, owner-only channel clone, which is itself an audited, signed action.

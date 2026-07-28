@@ -78,10 +78,13 @@ Silent Mesh's own identity (architecture.md §9). Runs on the relay + agent
 foundations of Phase 2; the Swift client (Phase 4) can start in parallel once the
 Phase 2 protocol has stabilized.
 
-- **Model gateway + privacy tiers (D21/D24)**: internal OpenAI- and
+- **Model gateway + privacy tiers (D21/D24/D26)**: internal OpenAI- and
   Anthropic-compatible endpoints; tier-aware router (owned / private / open);
   channel privacy policy enforcement (a route below the channel's tier is refused
-  at the gateway, not by convention); per-request attribution
+  at the gateway, not by convention); tier immutable at creation, with the
+  **owner-only channel-clone operation** (repo forked with history, membership
+  copied, fresh stream with provenance link, jobs never migrate) as the only
+  re-tiering path; per-request attribution
   `(user, agent, channel, thread, model, tier, backend)` with token accounting
   tables + usage projections; owner-settable per-user budgets.
 - **Local serving on the 2× RTX 4060 8 GB GPUs**: stack spike (llama.cpp server vs
@@ -111,8 +114,10 @@ question, and queues the job; the harness agent completes it on a local model
 (thread, tools, checkpoint, push all work). Reconnect WAN: the same request in a
 `private` channel routes to the TEE provider after attestation, and in an `open`
 channel to the member's own Claude subscription. A route below a channel's tier is
-refused by the gateway. The owner's usage query shows per-user totals broken down
-by tier and backend.
+refused by the gateway; changing a channel's tier is impossible, and the owner
+clones an `owned-only` channel into an `open` one (repo forked, fresh stream)
+while a non-owner's clone attempt is refused. The owner's usage query shows
+per-user totals broken down by tier and backend.
 
 ## Phase 4 — Swift macOS client MVP
 
@@ -204,8 +209,9 @@ history intact.
 3. Copilot model choice (shared or distinct between client and server variants)
    and how much routing intelligence lives in the model vs in policy code —
    Phase 3/5 spikes.
-4. Inference-queue semantics: retention of undispatched jobs, cancellation,
-   re-routing when a channel's policy changes while a job is queued.
+4. Inference-queue semantics: retention of undispatched jobs and cancellation UX.
+   (Cross-tier re-routing is settled by D26 — tiers never change; jobs are
+   re-queued in a cloned channel if needed.)
 5. Metering policy detail: budgets vs reporting-only, per-user vs per-channel caps,
    what the non-owner members get to see.
 6. Harness customization surface for v1 (persona + tier/model route + tool
