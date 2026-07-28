@@ -41,6 +41,8 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D25 | Prompt Copilot | A private local model (client machine, or server GPUs when online) that sees the task's files, takes voice or text intent, refines the prompt, asks clarifying questions, and queues the job for the most adequate model within channel policy |
 | D26 | Immutable channel tier | A channel's privacy tier is **fixed at creation and never changes**. Moving work to a different tier = the **owner (and only the owner) clones the channel** with a new tier — the repo forks, the conversation stays behind |
 | D27 | Thread forking | **Any member can clone a thread** — at its head or at any checkpoint — into a new variation with its own branch + worktree in the same channel, like branching a worktree. Inherited conversation is shown by reference to the origin thread; variations merge back through normal git flow |
+| D28 | Thread archiving | T3's thread archiving (experimental in current T3 nightlies) becomes a **core lifecycle state** alongside settled/snoozed — signed lifecycle events; archived threads leave default views but stay searchable; losing fork variations archive rather than delete |
+| D29 | Personal channels + promotion | Every member gets a **private personal channel** (membership of one, plus their agents) to organize their own threads and files, and can **promote** a private thread's work into a team channel — files transplant, the private conversation stays behind — where others review, comment, and fork it |
 
 ## 2. The core mapping
 
@@ -50,6 +52,7 @@ Buzz channel            →  Channel = a folder on the server = one git repo
 Slack channel messages  →  Channel stream (kind-9 events; humans + agents)
 Slack thread            →  Work thread (T3 Thread machinery: worktree, checkpoints, approvals)
 Buzz bot member         →  Agent (harness instance with its own keypair + Bot role)
+Slack DM with yourself  →  Personal channel (membership of one + your agents)
 Slack sidebar           →  Channel list, scoped to the member's channel memberships
 ```
 
@@ -158,7 +161,7 @@ kinds in a dedicated 47000–47999 block):
 | 20000–29999 | Ephemeral: typing, presence, **agent token-stream deltas** | NIP-16 |
 | 45001 / 45003 | Forum post / reply (if forum channels are wanted later) | Buzz |
 | 46001–46012 | Workflow/approval state (46011 = approval) | Buzz |
-| 47000–47999 | Silent Mesh: thread lifecycle, turn/activity, proposed plan, checkpoint ref, artifact published, **anchored comment**, **inference job queued/dispatched/completed**, sync marker, ACL change notice, usage summary (optional visibility of metering) | new |
+| 47000–47999 | Silent Mesh: thread lifecycle (incl. settled/snoozed/**archived**), thread fork, **thread promotion**, turn/activity, proposed plan, checkpoint ref, artifact published, **anchored comment**, **inference job queued/dispatched/completed**, sync marker, ACL change notice, usage summary (optional visibility of metering) | new |
 
 Two details worth calling out:
 
@@ -202,6 +205,23 @@ starts with fresh data, no migration of legacy rows is needed.
   model is: *"you can read whatever is in channels you belong to; what you can write
   is per-folder"*. Need read-secrecy? Make it its own channel. This is also exactly
   Buzz's boundary (private channels), so it composes cleanly.
+- **Personal channels (D29)**: every member gets a private channel with themselves
+  — membership of one, plus their agents — auto-provisioned at enrollment, with
+  more creatable at will. A personal channel is a full channel in every respect:
+  its own repo, threads, worktrees, and a privacy tier chosen at creation within
+  owner-allowed bounds (immutable like any channel, D26). It is the member's
+  organizing space for work that isn't ready for a team audience.
+- **Promotion (D29)**: a member promotes a private thread's work into a team
+  channel they belong to. The thread's branch state (head or a chosen checkpoint)
+  transplants onto the target channel's repo as a new thread + worktree, announced
+  by a promotion event in the target stream — with an optional copilot-drafted
+  summary of the work so far. The private conversation stays in the personal
+  channel: team members never gain access to origin events (ACL), so for them the
+  promoted thread starts from the files + summary, while the creator keeps a
+  private provenance link back. From there the team reviews, comments, and forks
+  it like any thread (D27). Promoting into a channel with a looser tier than the
+  personal channel requires explicit confirmation, since the content becomes
+  routable to looser inference backends.
 - **Audit**: every action is already a signed event; the relay additionally keeps a
   Buzz-style hash-chained audit log so tampering with SQLite is evident.
 
@@ -220,6 +240,11 @@ starts with fresh data, no migration of legacy rows is needed.
   special permission: it stays inside the same channel, tier, and ACLs, so no
   boundary is crossed. Sibling variations sit side by side like branches; the one
   that wins merges back through the normal git flow, and the others archive.
+- **Thread lifecycle (D28)**: T3's settled / snoozed / archived states carry over
+  as signed lifecycle events — archiving, experimental in current T3 nightlies,
+  is core in Silent Mesh. Archived threads leave default views but remain
+  searchable and linkable (their events and checkpoints are immutable history
+  anyway); losing fork variations are archived, never deleted.
 - The server exposes `GET /git/<channel>/info/refs`, `POST /git/<channel>/git-upload-pack`,
   `POST /git/<channel>/git-receive-pack`, authenticated with NIP-98, authorized by
   membership + write ACLs in a pre-receive policy hook. A push emits a git event into
@@ -403,9 +428,10 @@ client reuses everything below the view layer:
   store, not a third party) and stored in the vault; the model lineup is upgradable
   independently of app releases. This stack also ports to Linux clients if those
   ever happen.
-- **UI**: Slack-like sidebar (channels → unread/mention badges), channel view
-  (stream + threads), thread view (T3's turn/approval/diff semantics, plus
-  fork-at-checkpoint and a variations switcher across sibling forks), file browser,
+- **UI**: Slack-like sidebar (personal space + channels → unread/mention badges),
+  channel view (stream + threads), thread view (T3's turn/approval/diff semantics,
+  plus fork-at-checkpoint, a variations switcher across sibling forks,
+  promote-to-channel, and archive), archived-thread browsing, file browser,
   artifact viewer with selection/comment/regenerate, the prompt-copilot surface
   (push-to-talk intent capture, refinement dialogue, job queue with routing
   visibility), sync & conflict UI, member/ACL admin, vendor-subscription linking,

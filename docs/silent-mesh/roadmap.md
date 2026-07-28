@@ -61,6 +61,15 @@ Silent Mesh's domain model becomes real.
   origin; inherited conversation rendered by reference (agent gets it as context),
   never copied or re-signed; sibling variations listed against the origin; merge
   back via the normal git flow.
+- **Thread lifecycle (D28)**: settled / snoozed / archived as signed lifecycle
+  events (archive graduates from T3-nightly experimental to core); archived
+  threads drop from default views, stay searchable; losing forks auto-archive.
+- **Personal channels + promotion (D29)**: personal channel auto-provisioned at
+  enrollment (tier picked during onboarding, more creatable at will); promotion
+  transplants a private thread's branch state onto the target channel's repo as a
+  new thread + worktree with a promotion event (optional copilot summary — plain
+  text until Phase 3's copilot exists); private conversation never crosses;
+  explicit confirmation when the target tier is looser.
 - Agents as Bot members: keypair provisioning in the secret store, per-channel
   membership, @mention dispatch in streams (adapt `ProviderRuntimeIngestion` /
   `ProviderCommandReactor`), one in-flight prompt per channel stream (Buzz rule),
@@ -75,9 +84,12 @@ Silent Mesh's domain model becomes real.
 channel stream; the agent (its own key) replies in a thread, edits the channel repo
 in a worktree, a checkpoint event appears, the human approves a tool call, the
 result is pushed, and the push event shows in the stream. A second member forks
-that thread at an earlier checkpoint and drives a competing variation in its own
-worktree without disturbing the original. A non-member sees none of it; a member
-with read-only ACL on that folder gets their push rejected.
+that thread at an earlier checkpoint, drives a competing variation in its own
+worktree without disturbing the original, then archives the losing variation. A
+member promotes a thread from their personal channel into the team channel —
+files and summary arrive, the private conversation doesn't — and a teammate forks
+the promoted thread. A non-member sees none of it; a member with read-only ACL on
+that folder gets their push rejected.
 
 ## Phase 3 — Model plane: tiers, gateway, copilot, native harness
 
@@ -137,10 +149,11 @@ retrofits. macOS 14+ floor (D19).
   master key, biometric/PIN-gated unlock), app-lock flow.
 - Onboarding: enter server URL (VPN assumed) + invite code → local keypair
   generation → enrolled.
-- UI: channel sidebar with badges, channel stream + threads, agent interaction
-  (streaming, approvals, per-turn diffs), basic file browser reading via relay/git,
-  markdown/image viewing, owner admin screens (members, roles, channel ACLs, agent
-  profiles, usage dashboards).
+- UI: channel sidebar with badges and the personal space, channel stream +
+  threads, agent interaction (streaming, approvals, per-turn diffs),
+  fork/archive/promote affordances on threads, basic file browser reading via
+  relay/git, markdown/image viewing, owner admin screens (members, roles, channel
+  ACLs, agent profiles, usage dashboards).
 
 **Exit**: a two-person team + one agent runs a real working session entirely from
 the macOS app; the app relaunches locked and requires Touch ID/PIN; the vault is
