@@ -93,6 +93,11 @@ a non-member sees nothing.
 - **Content Seals (D31)**: registry, workspace sweep, ingestion guards
   (pre-receive + event ingest), delivery redaction envelopes, gateway
   resolution/scrub, mandatory-redaction integration with the gate.
+- **Retrieval foundation (D37)**: pgvector + continuous local-embedding
+  pipeline (owned-tier only, forbidden from remote routes in the router, like
+  gate inference); ACL-scoped search API layered over buzz-search FTS; retrieval
+  tools exposed to the copilot and harness agents; sealed content indexed in
+  token form only.
 
 **Exit**: in an `owned-only` channel with WAN cut, a member's spoken request is
 refined by the copilot, queued, and completed by the harness on a local model
@@ -100,8 +105,9 @@ refined by the copilot, queued, and completed by the harness on a local model
 request routes to TEE in a `private` channel and to the member's own Claude
 subscription in an `open` one; below-tier routes refused. A value sealed at
 `private` resolves in the TEE request, arrives scrubbed vendor-bound, renders as
-a placeholder in `open`, and a raw-value paste is caught at ingestion. Usage
-query shows per-user totals by tier and backend.
+a placeholder in `open`, and a raw-value paste is caught at ingestion. An
+agent's retrieval query returns only content from channels its operator can
+read. Usage query shows per-user totals by tier and backend.
 
 ## Phase 4 — Swift macOS client MVP
 
@@ -150,7 +156,36 @@ new version lands with comment history intact. The owner seals a figure at
 `private`; an `open`-channel clone renders it as a placeholder and vendor-bound
 regeneration requests go out scrubbed.
 
-## Phase 7 — Hardening and iOS
+## Phase 7 — Knowledge plane: wiki, reconciliation, disputes
+
+`sm-knowledge` (architecture §12), building on Phase 3's retrieval foundation.
+Runs after the artifact phase because reconciliation consumes the markdown +
+artifact corpus those phases produce.
+
+- Knowledge channel(s) with service-maintained wiki articles: distillation from
+  threads/artifacts with provenance links; wiki browsing + search in the Swift
+  client and buzz-cli.
+- Continuous reconciliation watchers: new events/pushes trigger incremental
+  article updates (service-owned pages auto-update; human-owned files get
+  update-proposal work threads, never silent edits); flows from
+  stricter/private channels into the wiki pass a batched Privacy Gate with
+  seals enforced.
+- **Dispute lifecycle (D39)**: contradiction detection (extractor +
+  human/agent flagging) → dispute event with both claims + provenance →
+  escalation to the privileged decider (owner, or owner-designated steward
+  with read access to all sources) → signed decision event → propagation:
+  wiki records the chosen value, correction proposals open everywhere the
+  losing value appears.
+- Steward designation (per channel/domain) in the admin surfaces.
+
+**Exit**: seed contradictory facts in two channels' docs; the service raises a
+dispute; the designated steward (who can read both sources) decides B; the wiki
+shows B with the dispute and decision linked; a correction proposal appears in
+the channel still saying A; searching finds the reconciled article with
+provenance; a non-member of a private source channel sees neither that source's
+contribution nor its existence.
+
+## Phase 8 — Hardening and iOS
 
 - Key lifecycle (multi-device transfer, rotation/revocation), backup/restore
   drills, LUKS + deployment guide.
@@ -160,6 +195,8 @@ regeneration requests go out scrubbed.
 - Harness customization expansion (skills/plugins) informed by v1 usage; decide
   fate of dormant Buzz features (huddles, canvases, forum, workflows, mesh
   compute) — enable, adopt, or leave dormant.
+- Knowledge-plane hardening: reconciliation confidence tuning, dispute-noise
+  review, wiki backup/rebuild-from-provenance drill.
 - iOS client reusing MeshProtocol/MeshVault/MeshSync/MeshIntelligence.
 
 ## Standing risks
@@ -178,6 +215,8 @@ regeneration requests go out scrubbed.
 | Seal tokens must survive agent edits and merges | plain-text markers robust to diff/merge; pre-receive lint; looser contexts only ever hold placeholders |
 | Deep-seal rewrites invalidate clones and SHA references | old→new SHA remap table; forced re-sync with vault purge; rare, owner-only, blast-radius-confirmed |
 | Postgres/Redis/MinIO ops vs T3's single process | inherited compose/Helm deploys with healthchecks; one Linux host is the supported profile |
+| Reconciliation noise (bad auto-updates, spurious disputes) | service auto-edits only pages it owns; everything else is a proposal; disputes require provenance on both claims; confidence thresholds tuned in Phase 8 |
+| The index as an ACL side-channel | retrieval scoping enforced server-side per query; embeddings owned-tier only; sealed content indexed as tokens; wiki inherits channel membership/tier like any content |
 
 ## Open questions (deliberately deferred)
 
@@ -197,5 +236,9 @@ regeneration requests go out scrubbed.
 10. Deep-seal mechanics detail (rewrite tooling; remap-table retention;
     redaction envelopes for events quoting leaked values).
 11. Which dormant Buzz features to eventually adopt (huddles, canvases, forum,
-    workflows, mesh compute) — Phase 7 review.
+    workflows, mesh compute) — Phase 8 review.
 12. Upstreaming cadence and relationship with Block (governance patches first).
+13. Knowledge-plane detail: embedding model + chunking strategy (Phase 3 spike,
+    alongside the serving-stack spike), claim-extraction approach for dispute
+    detection, wiki structure/ownership conventions, steward scoping
+    granularity.

@@ -55,6 +55,9 @@ codebases, D33 re-decided the foundation. **All D1–D32 product semantics survi
 | D34 | Stack | Rust-first backend accepted; TS only where inherited surfaces need it; Swift for clients |
 | D35 | Fork posture | **Track upstream**: additive crates/middleware/new kinds over invasive edits; no mass renames (brand at config/deploy level); upstream-owned trees (desktop/mobile/web) stay in-tree **unbuilt** rather than deleted, so rebases stay clean; upstream our governance work where Block will take it |
 | D36 | Interim client | **CLI-only until the Swift MVP** (buzz-cli + scripted/test clients + admin CLI). Inherited Buzz clients are not shipped or supported, though the in-tree desktop app remains available as a developer debugging tool |
+| D37 | Indexing & retrieval | The server continuously runs an **indexing + embedding service** (FTS + vectors) over all workspace content so users and agents retrieve information fast. Embeddings are computed **exclusively on owned hardware** (embedding via remote backends is wholesale egress and is prohibited by design); every retrieval query is **ACL-scoped** to the requester's readable channels |
+| D38 | Knowledge wiki | The workspace's information — markdown files and artifacts produced in threads and saved in channels — **reconciles continuously into a single source of truth**, presented wiki-style, browsable and searchable, with provenance links to sources. The service auto-maintains wiki articles it owns and opens **update proposals** (never silent edits) for human-owned files; cross-channel flow into the wiki obeys tier/membership rules |
+| D39 | Dispute escalation | When sources disagree on a data point (A vs B), the service raises a **dispute** escalated to a member with the privilege to decide (owner by default; owner may designate stewards per channel/domain; the decider must be able to read all sources). The decision is a signed event, and the service **propagates the chosen value throughout** — wiki updated, correction proposals opened wherever the losing value appears |
 
 ## 2. The core mapping
 
@@ -114,6 +117,9 @@ exactly those.
    artifact viewer with durable comments) and later iOS — §12.
 7. **Durable anchored comments on artifacts** (Buzz has frame-anchored media
    comments and canvases; we extend the pattern to HTML artifacts and files).
+8. **Knowledge plane** (D37–D39) — continuous indexing/embedding, ACL-scoped
+   retrieval for humans and agents, the reconciled wiki, and dispute
+   escalation — §12.
 
 ### Not shipped (kept in-tree, unbuilt — D35/D36)
 
@@ -149,9 +155,12 @@ The Buzz stack, single-host via compose, plus Silent Mesh's additive services:
                    │  │    └─ open:    per-user vendor subscriptions        │
                    │  ├─ sm-seals: sweep · ingestion guards · delivery      │
                    │  │    envelopes · gateway scrub               (NEW)    │
+                   │  ├─ sm-knowledge: FTS+vector index · wiki              │
+                   │  │    reconciliation · dispute escalation     (NEW)    │
                    │  └─ Prompt Copilot + inference job queue      (NEW)    │
                    │                                                        │
-                   │  Postgres (events, projections) · Redis (fan-out)      │
+                   │  Postgres+pgvector (events, projections, index)        │
+                   │  Redis (fan-out)                                       │
                    │  MinIO (git CAS, media, model weights)                 │
                    └────────────────────────────────────────────────────────┘
 ```
@@ -170,7 +179,8 @@ subject to membership.
 Silent Mesh adds its **47000–47999 block**: work-thread lifecycle (incl.
 settled/snoozed/archived), thread fork, thread promotion, turn/activity, proposed
 plan, checkpoint ref, artifact published, anchored comment, inference job
-queued/dispatched/completed, content seal, sync marker, ACL change notice, usage
+queued/dispatched/completed, content seal, knowledge article updated, knowledge
+dispute raised, knowledge decision, sync marker, ACL change notice, usage
 summary. Agent token-streaming uses ephemeral kinds (20000–29999); final messages
 persist as one signed event. Approval kinds 46010/46011 are inherited names that
 we actually wire (§8).
@@ -277,7 +287,47 @@ Semantics exactly as D16–D25; the base flip changes the substrate:
 - **Prompt Copilot (D25)** and the signed inference-job queue as decided; gate
   and copilot inference pinned to the owned tier in the router.
 
-## 12. Swift macOS client (and the iOS path)
+## 12. Knowledge plane: index, wiki, reconciliation, disputes
+
+The `sm-knowledge` service (D37–D39) is the workspace's continuously-running
+organizational memory:
+
+- **Continuous indexing**: event-driven — every new message, thread turn,
+  artifact, and git push triggers incremental indexing. Full-text search
+  inherits `buzz-search` (Postgres FTS); semantic search adds **pgvector**
+  embeddings computed **only on the server GPUs** — routing embedding through a
+  remote backend would be wholesale content egress, so the tier router forbids
+  it categorically, like gate/copilot inference.
+- **ACL-scoped retrieval**: every query — from a human's search box, the Prompt
+  Copilot's context gathering, or a harness agent's retrieval tool — is scoped
+  server-side to channels the requester can read. Sealed content is indexed
+  only in token form (post-sweep content is tokenized anyway), so the index
+  never holds raw sealed values. Results carry provenance (channel, thread,
+  file, commit).
+- **The wiki**: one or more dedicated knowledge channels (own repo, tier, and
+  membership like any channel — typically team-wide) hold markdown articles
+  maintained by the service, each with provenance links to the threads and
+  artifacts it was distilled from. Browsable wiki-style and searchable from
+  every client.
+- **Continuous reconciliation**: when new information lands anywhere, the
+  service updates the wiki articles *it owns* automatically, and for
+  human-owned files elsewhere it opens **update proposals** — ordinary work
+  threads with diffs — never silent edits. Information flowing from a stricter
+  or private channel into the wiki is a privacy-weakening movement and passes
+  the **Privacy Gate** (a batched, lightweight form) with seals enforced as
+  always.
+- **Disputes (D39)**: when sources disagree about a data point (A vs B) — the
+  extractor detects a contradiction, or a human/agent flags one — the service
+  raises a **knowledge dispute** event showing both claims with provenance. It
+  escalates to a member with the privilege to decide: the owner by default, or
+  a **steward** the owner designates per channel/domain; the decider must have
+  read access to every source involved. The decision is a **signed event**; the
+  service then propagates it throughout — the wiki records the chosen value
+  (with the dispute + decision linked for the record), and correction proposals
+  open in every location still carrying the losing value. Dispute → decision →
+  propagation is a fully auditable chain.
+
+## 13. Swift macOS client (and the iOS path)
 
 Unchanged in design (macOS 14+, D19): `MeshProtocol` (NIP-01/10/42/98 — now
 testable against Buzz's conformance suite and interop E2E, a real gift),
@@ -286,12 +336,13 @@ testable against Buzz's conformance suite and interop E2E, a real gift),
 `MeshIntelligence` (whisper.cpp + llama.cpp/MLX; client-side copilot; offline
 Privacy Gate). UI as decided: channels/streams/threads with fork/archive/promote,
 approvals, file browser, artifact viewer with seal-aware rendering and durable
-comments, gate review flow, owner admin incl. usage dashboards.
+comments, gate review flow, workspace search + wiki browsing (§12), owner admin
+incl. usage dashboards.
 
 Until it ships: **buzz-cli and scripted clients are the only supported surface**
 (D36).
 
-## 13. Fork discipline (D35)
+## 14. Fork discipline (D35)
 
 - Silent Mesh changes live in **additive crates** (`sm-work`, `sm-gateway`,
   `sm-seals`) and registered extension points; invasive relay edits only when
