@@ -57,6 +57,12 @@ The `sm-work` crate (architecture §7) plus channel↔repo semantics.
 - Work threads as 47xxx kinds: thread bound to a worktree on the channel repo;
   per-turn checkpoints (hidden refs); diff/revert; plan-then-execute mode;
   buzz-acp agent workspaces aligned onto thread worktrees.
+- **Task framing (D40)**: threads launch with goal, optional deadline, and DRI
+  (human or agent); overdue notices tag the DRI in the stream.
+- **Canonicalization (D38/D40)**: the `canon/` convention on every channel
+  repo; completing a thread merges its output into the canonical layer and
+  archives the thread (structural mechanics here; intelligent distillation
+  arrives with sm-knowledge in Phase 7).
 - **Thread forking (D27)**, **lifecycle incl. archive (D28)**, **personal
   channels + promotion (D29)** with the **Privacy Gate scaffold (D30)** —
   mandatory review/confirm with member-written summary + deterministic secret
@@ -64,13 +70,15 @@ The `sm-work` crate (architecture §7) plus channel↔repo semantics.
 - **Folder/file write ACLs (D4)**: file-path rules in the pre-receive policy
   hook + agent tool layer.
 
-**Exit**: from buzz-cli — a human posts `@claude fix the parser`; the agent
-replies in a work thread, edits in a worktree, a checkpoint event appears, a
-supervised tool call is approved, the push event lands in the stream. A second
-member forks at an earlier checkpoint, drives a variation, archives the loser. A
-member promotes a personal-channel thread through the gate scaffold — files and
-summary arrive, conversation doesn't. A read-only-ACL member's push is rejected;
-a non-member sees nothing.
+**Exit**: from buzz-cli — a human launches a task thread (`goal: fix the
+parser`, deadline, DRI = the claude agent); the agent works in a worktree, a
+checkpoint event appears, a supervised tool call is approved, the push event
+lands in the stream, and on completion the thread's output canonicalizes into
+the channel's `canon/` and the thread archives. A second member forks at an
+earlier checkpoint, drives a variation, archives the loser. A member promotes a
+personal-channel thread through the gate scaffold — files and summary arrive,
+conversation doesn't. An overdue deadline tags the DRI in the stream. A
+read-only-ACL member's push is rejected; a non-member sees nothing.
 
 ## Phase 3 — Model plane: tiers, gateway, copilot, harness
 
@@ -158,18 +166,21 @@ regeneration requests go out scrubbed.
 
 ## Phase 7 — Knowledge plane: wiki, reconciliation, disputes
 
-`sm-knowledge` (architecture §12), building on Phase 3's retrieval foundation.
-Runs after the artifact phase because reconciliation consumes the markdown +
-artifact corpus those phases produce.
+`sm-knowledge` (architecture §12), building on Phase 3's retrieval foundation
+and Phase 2's `canon/` + canonicalization mechanics. Runs after the artifact
+phase because reconciliation consumes the markdown + artifact corpus those
+phases produce.
 
-- Knowledge channel(s) with service-maintained wiki articles: distillation from
-  threads/artifacts with provenance links; wiki browsing + search in the Swift
-  client and buzz-cli.
-- Continuous reconciliation watchers: new events/pushes trigger incremental
-  article updates (service-owned pages auto-update; human-owned files get
-  update-proposal work threads, never silent edits); flows from
-  stricter/private channels into the wiki pass a batched Privacy Gate with
-  seals enforced.
+- **Intelligent canonicalization**: distillation of completed-thread output
+  into the channel's canonical docs with provenance links (upgrading Phase 2's
+  structural merge); service-owned summary pages auto-maintained.
+- **Cross-canon wiki view**: wiki-style navigation + search assembled
+  per-viewer across every canon they can read, in the Swift client and
+  buzz-cli.
+- **Cross-channel reconciliation watchers**: new canonical information in one
+  channel triggers update-proposal work threads in affected channels (never
+  silent edits); proposals from stricter sources pass a batched Privacy Gate
+  with seals enforced.
 - **Dispute lifecycle (D39)**: contradiction detection (extractor +
   human/agent flagging) → dispute event with both claims + provenance →
   escalation to the privileged decider (owner, or owner-designated steward
@@ -178,12 +189,14 @@ artifact corpus those phases produce.
   losing value appears.
 - Steward designation (per channel/domain) in the admin surfaces.
 
-**Exit**: seed contradictory facts in two channels' docs; the service raises a
-dispute; the designated steward (who can read both sources) decides B; the wiki
-shows B with the dispute and decision linked; a correction proposal appears in
-the channel still saying A; searching finds the reconciled article with
-provenance; a non-member of a private source channel sees neither that source's
-contribution nor its existence.
+**Exit**: two channels' canons carry contradictory facts; the service raises a
+dispute; the designated steward (who can read both sources) decides B; the
+winning canon records B with the dispute and decision linked; a correction
+proposal appears in the channel whose canon still says A; the cross-canon wiki
+view and search show the reconciled fact with provenance; a non-member of a
+private source channel sees neither that canon's contribution nor its
+existence. Separately: a completed task thread's output is distilled into its
+channel's canon with a provenance link back to the thread.
 
 ## Phase 8 — Hardening and iOS
 
@@ -240,5 +253,6 @@ contribution nor its existence.
 12. Upstreaming cadence and relationship with Block (governance patches first).
 13. Knowledge-plane detail: embedding model + chunking strategy (Phase 3 spike,
     alongside the serving-stack spike), claim-extraction approach for dispute
-    detection, wiki structure/ownership conventions, steward scoping
-    granularity.
+    detection, `canon/` structure and ownership conventions (service-owned vs
+    human-owned pages), steward scoping granularity, and which thread states
+    trigger canonicalization (closed vs archived vs explicit).

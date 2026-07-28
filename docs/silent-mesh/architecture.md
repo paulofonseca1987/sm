@@ -56,16 +56,19 @@ codebases, D33 re-decided the foundation. **All D1–D32 product semantics survi
 | D35 | Fork posture | **Track upstream**: additive crates/middleware/new kinds over invasive edits; no mass renames (brand at config/deploy level); upstream-owned trees (desktop/mobile/web) stay in-tree **unbuilt** rather than deleted, so rebases stay clean; upstream our governance work where Block will take it |
 | D36 | Interim client | **CLI-only until the Swift MVP** (buzz-cli + scripted/test clients + admin CLI). Inherited Buzz clients are not shipped or supported, though the in-tree desktop app remains available as a developer debugging tool |
 | D37 | Indexing & retrieval | The server continuously runs an **indexing + embedding service** (FTS + vectors) over all workspace content so users and agents retrieve information fast. Embeddings are computed **exclusively on owned hardware** (embedding via remote backends is wholesale egress and is prohibited by design); every retrieval query is **ACL-scoped** to the requester's readable channels |
-| D38 | Knowledge wiki | The workspace's information — markdown files and artifacts produced in threads and saved in channels — **reconciles continuously into a single source of truth**, presented wiki-style, browsable and searchable, with provenance links to sources. The service auto-maintains wiki articles it owns and opens **update proposals** (never silent edits) for human-owned files; cross-channel flow into the wiki obeys tier/membership rules |
-| D39 | Dispute escalation | When sources disagree on a data point (A vs B), the service raises a **dispute** escalated to a member with the privilege to decide (owner by default; owner may designate stewards per channel/domain; the decider must be able to read all sources). The decision is a signed event, and the service **propagates the chosen value throughout** — wiki updated, correction proposals opened wherever the losing value appears |
+| D38 | Canonical docs per channel | **Every channel is a knowledge channel** — no dedicated wiki channels. Each channel carries its own **canonical docs**: the current truth about its topic, living alongside its chat in the same repo. The workspace wiki is the **ACL-scoped union of all canons**, browsable wiki-style and searchable, with provenance. The service auto-maintains distilled canon it owns and opens **update proposals** elsewhere — never silent edits |
+| D39 | Dispute escalation | When sources disagree on a data point (A vs B), the service raises a **dispute** escalated to a member with the privilege to decide (owner by default; owner may designate stewards per channel/domain; the decider must be able to read all sources). The decision is a signed event, and the service **propagates the chosen value throughout** — canons updated, correction proposals opened wherever the losing value appears |
+| D40 | Thread = task | A work thread is launched **as a task**: a goal, an optional **deadline**, and a **DRI** (directly responsible individual — human or agent). When the thread completes (closed/archived), its output is **canonicalized** into the channel's canonical docs; overdue deadlines notify the DRI in the stream |
 
 ## 2. The core mapping
 
 ```
 Buzz community          →  Silent Mesh server (one team per server)
-Buzz Stream channel     →  Channel = a folder on the server = one bound git repo
+Buzz Stream channel     →  Channel = folder = repo = chat + canonical docs on one topic
 Buzz kind-9 stream      →  Channel conversation (humans + agents, @mentions)
 Slack thread            →  Work thread (NEW: worktree, checkpoints, approvals — T3's design)
+Linear-style task       →  The same work thread: goal, deadline, DRI; output
+                           canonicalizes into the channel's docs on completion
 Buzz Bot member         →  Agent (buzz-acp harness or buzz-agent instance, own keypair)
 Buzz DM-with-self       →  Personal channel (membership of one + your agents, own repo)
 Buzz desktop sidebar    →  Reference UX only — Silent Mesh ships the Swift client
@@ -179,9 +182,10 @@ subject to membership.
 Silent Mesh adds its **47000–47999 block**: work-thread lifecycle (incl.
 settled/snoozed/archived), thread fork, thread promotion, turn/activity, proposed
 plan, checkpoint ref, artifact published, anchored comment, inference job
-queued/dispatched/completed, content seal, knowledge article updated, knowledge
-dispute raised, knowledge decision, sync marker, ACL change notice, usage
-summary. Agent token-streaming uses ephemeral kinds (20000–29999); final messages
+queued/dispatched/completed, thread canonicalized, content seal, canon updated,
+knowledge dispute raised, knowledge decision, sync marker, ACL change notice,
+usage summary. Task metadata (goal, deadline, DRI, overdue notice) rides the
+thread-lifecycle kinds. Agent token-streaming uses ephemeral kinds (20000–29999); final messages
 persist as one signed event. Approval kinds 46010/46011 are inherited names that
 we actually wire (§8).
 
@@ -226,6 +230,20 @@ The `sm-work` layer gives Buzz what T3 had and Buzz lacks:
 - **Lifecycle (D28)**: settled / snoozed / archived as signed events; losing
   variations archive.
 - **Promotion (D29)** out of personal channels, through the Privacy Gate (D30).
+- **Task framing (D40)**: a thread is launched as a task — a **goal** (the
+  brief), an optional **deadline**, and a **DRI** (human or agent member)
+  responsible for driving it to done. Overdue deadlines emit a notice into the
+  channel stream tagging the DRI. An agent DRI drives the work itself; a human
+  DRI drives the agents.
+- **Canonicalization (D38/D40)**: every channel repo carries a **canonical docs
+  layer** — a conventional `canon/` area on the main branch holding the current
+  truth about the channel's topic. Thread work lives on the thread's branch;
+  when the thread completes, its output **merges into the canonical layer**
+  (the same merge-back flow, now with organizational meaning) and
+  `sm-knowledge` distills the canonical doc updates with provenance links back
+  to the thread. The thread then archives (D28). Chat and canon live in one
+  place: joining a channel gives you the conversation *and* the accumulated
+  truth of its topic.
 - Buzz's existing agent workspace convention (OUTBOX/, REPOS/) is aligned with
   worktree binding so buzz-acp agents operate inside the thread's worktree.
 
@@ -304,28 +322,33 @@ organizational memory:
   only in token form (post-sweep content is tokenized anyway), so the index
   never holds raw sealed values. Results carry provenance (channel, thread,
   file, commit).
-- **The wiki**: one or more dedicated knowledge channels (own repo, tier, and
-  membership like any channel — typically team-wide) hold markdown articles
-  maintained by the service, each with provenance links to the threads and
-  artifacts it was distilled from. Browsable wiki-style and searchable from
-  every client.
-- **Continuous reconciliation**: when new information lands anywhere, the
-  service updates the wiki articles *it owns* automatically, and for
-  human-owned files elsewhere it opens **update proposals** — ordinary work
-  threads with diffs — never silent edits. Information flowing from a stricter
-  or private channel into the wiki is a privacy-weakening movement and passes
-  the **Privacy Gate** (a batched, lightweight form) with seals enforced as
+- **Canon, not a wiki place (D38)**: there are no dedicated knowledge channels —
+  **every channel is a knowledge channel**, carrying its own canonical docs
+  (`canon/`, §7) as the current truth about its topic. Canon inherits the
+  channel's membership and tier *by construction* — there is nothing to gate
+  when a channel's own thread canonicalizes into its own docs. The
+  **workspace wiki is a view**: wiki-style navigation and search assembled
+  per-viewer across every canon they can read, with provenance on every
+  statement. Distilled summary pages the service itself owns are maintained
+  automatically; everything else is proposals.
+- **Continuous reconciliation**: the service watches every channel. Inside a
+  channel, canonicalized thread output updates that channel's canon (§7).
+  **Across channels**, when new canonical information in channel X affects
+  what channel Y's canon says, the service opens an **update proposal** in Y —
+  an ordinary work thread with a diff — never a silent edit. Cross-channel
+  proposals carry only content Y's members may see: if X is stricter than Y,
+  the proposed content passes the **Privacy Gate** with seals enforced as
   always.
-- **Disputes (D39)**: when sources disagree about a data point (A vs B) — the
-  extractor detects a contradiction, or a human/agent flags one — the service
-  raises a **knowledge dispute** event showing both claims with provenance. It
-  escalates to a member with the privilege to decide: the owner by default, or
-  a **steward** the owner designates per channel/domain; the decider must have
-  read access to every source involved. The decision is a **signed event**; the
-  service then propagates it throughout — the wiki records the chosen value
-  (with the dispute + decision linked for the record), and correction proposals
-  open in every location still carrying the losing value. Dispute → decision →
-  propagation is a fully auditable chain.
+- **Disputes (D39)**: when canons or sources disagree about a data point
+  (A vs B) — the extractor detects a contradiction, or a human/agent flags
+  one — the service raises a **knowledge dispute** event showing both claims
+  with provenance. It escalates to a member with the privilege to decide: the
+  owner by default, or a **steward** the owner designates per channel/domain;
+  the decider must have read access to every source involved. The decision is
+  a **signed event**; the service then propagates it throughout — the winning
+  canon records the value (with the dispute + decision linked for the record),
+  and correction proposals open in every channel still carrying the losing
+  value. Dispute → decision → propagation is a fully auditable chain.
 
 ## 13. Swift macOS client (and the iOS path)
 
@@ -334,10 +357,11 @@ testable against Buzz's conformance suite and interop E2E, a real gift),
 `MeshVault` (SE-wrapped master key, biometric/PIN unlock, encrypted store),
 `MeshSync` (libgit2 against the inherited forge endpoints + signed-event outbox),
 `MeshIntelligence` (whisper.cpp + llama.cpp/MLX; client-side copilot; offline
-Privacy Gate). UI as decided: channels/streams/threads with fork/archive/promote,
-approvals, file browser, artifact viewer with seal-aware rendering and durable
-comments, gate review flow, workspace search + wiki browsing (§12), owner admin
-incl. usage dashboards.
+Privacy Gate). UI as decided: channels/streams/threads with fork/archive/promote, task
+metadata (goal, deadline, DRI) with a task-board view over threads, per-channel
+canon browsing, approvals, file browser, artifact viewer with seal-aware
+rendering and durable comments, gate review flow, workspace search + the
+cross-canon wiki view (§12), owner admin incl. usage dashboards.
 
 Until it ships: **buzz-cli and scripted clients are the only supported surface**
 (D36).
