@@ -29,11 +29,16 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D13 | Client security | Files encrypted at rest on the client, accessible only inside the app; app lock via Face ID / Touch ID / PIN |
 | D14 | Offline | Synced files remain editable offline; local on-device models handle summarize, translate, and voice-to-text |
 | D15 | Vendor harnesses | Keep **Claude, Codex, and Grok CLI** (Grok via the existing ACP driver). Drop the Cursor and OpenCode drivers |
-| D16 | Model plane | All model traffic routes through a **server-side model gateway with per-user token metering**. Three backends: server-local GPUs (2× RTX 4060 8 GB), a remote inference provider, and the vendor harness APIs |
+| D16 | Model plane | All model traffic routes through a **server-side model gateway with per-user token metering**. Backends: server-local GPUs (2× RTX 4060 8 GB), a remote inference provider, and the vendor harness APIs *(backend set refined by D21–D23)* |
 | D17 | Native harness | Silent Mesh builds **its own agent harness** on top of the gateway; each user customizes their agent (persona, tools, model routing) within owner-set bounds |
-| D18 | Airgapped agent | **V1 requirement** — server-local models make zero-egress channels possible from launch |
+| D18 | Airgapped agent | **V1 requirement** — server-local models make zero-egress channels possible from launch *(generalized into channel privacy tiers by D24)* |
 | D19 | Client local models | **Bundled open models** (whisper.cpp for transcription, llama.cpp/MLX for summarize/translate); macOS 14+ floor |
 | D20 | Kind registry | Standard NIPs + Buzz's kinds where semantics genuinely match; Silent Mesh's own 47xxx block for the rest |
+| D21 | Privacy tiers | Model routing is privacy-tiered (refines D16/D18): **owned** = client-local (the only offline mode) or server GPUs; **private** = owned + a TEE-attested confidential inference provider; **open** = adds non-private vendor inference |
+| D22 | Private complex tasks | Complex work in the private tier runs through a **TEE-based confidential inference provider**, routed and metered by the gateway |
+| D23 | Non-private inference | Uses each member's **own Claude Code / Codex / Grok subscription**, authenticated per user the way Buzz agents do (the vendor CLI's own login flow; credentials held per member in the server secret store) |
+| D24 | Channel privacy policy | Every channel declares a minimum privacy tier — e.g. a channel can forbid non-private inference entirely (generalizes D18's airgapped flag) |
+| D25 | Prompt Copilot | A private local model (client machine, or server GPUs when online) that sees the task's files, takes voice or text intent, refines the prompt, asks clarifying questions, and queues the job for the most adequate model within channel policy |
 
 ## 2. The core mapping
 
@@ -83,8 +88,9 @@ those. Finer-grained control inside a channel is a write-side ACL (see §6).
 2. **Identity, membership, channels, ACLs** — the team layer (§6).
 3. **Git smart-HTTP endpoints with policy hooks** — repo-per-channel serving + sync (§7).
 4. **Blob store** — Blossom-compatible content-addressed media endpoints (voice memos, images, large artifacts) backed by server disk.
-5. **Model gateway** — routing + per-user token metering across local GPUs, a remote inference provider, and vendor APIs (§9).
+5. **Model gateway** — privacy-tiered routing + per-user token metering across client/server-local models, a TEE inference provider, and per-user vendor subscriptions (§9).
 6. **Native Silent Mesh harness** — Silent Mesh's own agent loop, per-user customizable (§9).
+7. **Prompt Copilot + inference queue** — voice/text intent → refined, clarified prompt → queued job routed to the most adequate model (§9).
 7. **Admin CLI** — community init, invites, members, roles, channels, ACLs, agent provisioning, model/usage admin, backup.
 8. **Swift macOS client** — the whole thing (§10).
 9. **Durable comments/annotations** — anchored, signed comment events on artifacts and files (§8). T3's UI-only comments become real entities.
@@ -113,10 +119,11 @@ a blob store, and a local model server on the GPUs:
                     │  │    │    └─ vendor CLIs: claude / codex / grok     │
                     │  │    ├─ Git reactor (push events, worktrees)        │
                     │  │    └─ Audit hash chain                            │
-                    │  ├─ Model gateway (per-user token metering)          │
-                    │  │    ├─ local models ── 2× RTX 4060 8 GB            │
-                    │  │    ├─ remote inference provider (server-held key) │
-                    │  │    └─ vendor APIs (proxied where possible)        │
+                    │  ├─ Model gateway (privacy tiers · per-user metering)│
+                    │  │    ├─ owned:   local models ── 2× RTX 4060 8 GB   │
+                    │  │    ├─ private: TEE inference provider (attested)  │
+                    │  │    └─ open:    per-user vendor subscriptions      │
+                    │  ├─ Prompt Copilot + inference job queue             │
                     │  └─ Projections (streams, threads, members,          │
                     │       files, usage) for fast client snapshots        │
                     │                                                      │
@@ -149,7 +156,7 @@ kinds in a dedicated 47000–47999 block):
 | 20000–29999 | Ephemeral: typing, presence, **agent token-stream deltas** | NIP-16 |
 | 45001 / 45003 | Forum post / reply (if forum channels are wanted later) | Buzz |
 | 46001–46012 | Workflow/approval state (46011 = approval) | Buzz |
-| 47000–47999 | Silent Mesh: thread lifecycle, turn/activity, proposed plan, checkpoint ref, artifact published, **anchored comment**, sync marker, ACL change notice, usage summary (optional visibility of metering) | new |
+| 47000–47999 | Silent Mesh: thread lifecycle, turn/activity, proposed plan, checkpoint ref, artifact published, **anchored comment**, **inference job queued/dispatched/completed**, sync marker, ACL change notice, usage summary (optional visibility of metering) | new |
 
 Two details worth calling out:
 
@@ -230,38 +237,97 @@ starts with fresh data, no migration of legacy rows is needed.
   the server (replacing T3's desktop-webview automation), so an agent can screenshot
   and verify the artifact it just produced.
 
-## 9. Model plane: gateway, metering, native harness
+## 9. Model plane: privacy tiers, gateway, copilot, native harness
 
-This is Silent Mesh's own identity beyond the fork (D16–D18).
+This is Silent Mesh's own identity beyond the fork (D16–D18, D21–D25).
+
+### Privacy tiers (D21)
+
+Every inference request is classified on two axes — privacy tier and task
+complexity — and routed accordingly:
+
+| | Simple tasks (summarize, translate, transcribe, prompt shaping) | Complex tasks (agentic coding, long-context reasoning) |
+|---|---|---|
+| **Owned** — data never leaves owner hardware | Client-local models (**the only offline mode**) or the server GPUs | Server GPUs, within their capability ceiling |
+| **Private** — owned hardware + attested TEE | same as owned | **TEE-based confidential inference provider** (D22) |
+| **Open** — non-private allowed | The member's own vendor subscription | The member's own Claude Code / Codex / Grok subscription (D23) |
+
+**Channel privacy policy (D24)**: each channel declares its minimum tier —
+`owned-only`, `private`, or `open`. The gateway router refuses any route below the
+channel's tier, so e.g. a channel marked `private` can never see a vendor
+subscription used, regardless of user or agent preference. `owned-only` is the
+airgapped mode of D18. Users choose routes freely *within* what the channel allows.
 
 ### Model gateway
 
 A server subsystem exposing OpenAI- and Anthropic-compatible endpoints internally,
-fronting three backend classes:
+fronting the tier backends:
 
-1. **Local models** — served from the 2× RTX 4060 8 GB GPUs (16 GB VRAM total) by a
-   local inference server (llama.cpp server / vLLM / Ollama — stack chosen by
-   spike). Realistic capacity: ~7–14B-class models at Q4–Q8, or ~24B with aggressive
-   quantization and partial CPU offload; embedding and rerank models fit trivially.
-2. **Remote inference provider** — one provider abstraction (OpenRouter/Together/
-   Fireworks/direct — chosen later); the API key lives only in the server secret
-   store; clients and agents never hold it.
-3. **Vendor APIs** — Anthropic/OpenAI/xAI traffic from the vendor harnesses, proxied
-   through the gateway via each CLI's base-URL override where the auth mode allows
-   it (API-key auth proxies cleanly; subscription/OAuth auth may not — see the
-   fallback below).
+1. **Server-local models** (owned) — the 2× RTX 4060 8 GB GPUs (16 GB VRAM total)
+   behind a local inference server (llama.cpp server / vLLM / Ollama — stack chosen
+   by spike). Realistic capacity: ~7–14B-class models at Q4–Q8, or ~24B with
+   aggressive quantization and partial CPU offload; embedding and rerank models fit
+   trivially.
+2. **TEE inference provider** (private) — one confidential-computing provider whose
+   inference runs inside attested trusted execution environments (GPU TEE /
+   confidential VMs). The gateway verifies attestation evidence before releasing a
+   request. Honest framing: this moves trust from "provider promises" to "hardware
+   attestation you verify" — strong, but not equivalent to owned hardware. Provider
+   choice is a Phase 3 spike; the abstraction keys on attestation-then-send.
+3. **Per-user vendor subscriptions** (open) — each member links their own
+   Claude Code / Codex / Grok account through the vendor CLI's normal login flow,
+   exactly as Buzz agents authenticate (D23). Credentials are stored per member in
+   the server secret store, strictly isolated: an agent operated for a user runs
+   only under that user's subscription. Costs land on the member's own plan.
 
 **Per-user token metering**: every request through the gateway is attributed to
-`(user, agent, channel, thread, model, backend)` with prompt/completion token
+`(user, agent, channel, thread, model, tier, backend)` with prompt/completion token
 counts, persisted and projected into usage summaries the owner can query (CLI and
-client admin screens); per-user budgets/limits are owner-settable. Where a vendor
-harness cannot be proxied (subscription auth), metering falls back to the
-harness-reported usage T3 already surfaces — attributed the same way, flagged as
-self-reported.
+client admin screens); per-user budgets/limits are owner-settable. Vendor
+subscription usage is metered from harness-reported counts (flagged self-reported)
+and costs the community nothing; client-local usage is on-device and unmetered.
 
-**Airgapped channels (v1)**: a channel policy flag restricting its agents to
-local-backend models only. With it set, no file content or prompt ever leaves the
-server — satisfying D18 from launch.
+### Prompt Copilot and the inference queue (D25)
+
+The copilot is a small, always-private model — running on the client machine
+(offline) or the server GPUs (online), never on remote backends — that turns rough
+intent into well-routed work:
+
+- **Sees the task's files**: workspace context within the user's ACL scope (channel
+  repo, open thread, selection/anchor if invoked from the viewer).
+- **Voice or text in**: on the client, whisper.cpp transcribes locally; the copilot
+  then refines the intent into a structured prompt, asking clarifying questions in
+  a short back-and-forth when the intent is ambiguous.
+- **Routes**: it proposes the most adequate target — task complexity × channel
+  privacy policy × user preference — e.g. "summarize this doc" → server GPU;
+  "refactor the sync engine" in an `open` channel → the user's Claude subscription;
+  same request in a `private` channel → the TEE provider.
+- **Queues**: the refined prompt becomes a signed **inference job event** (47xxx).
+  Jobs authored offline sit in the client outbox and dispatch when connectivity
+  returns; jobs whose target is busy queue server-side. Dispatch creates or
+  continues a work thread like any other prompt, so approvals/checkpoints apply
+  unchanged.
+
+### Native Silent Mesh harness
+
+Silent Mesh's own agent loop — a fourth driver behind the existing provider SPI, so
+orchestration/threads/approvals/checkpoints treat it like any other agent:
+
+- Built on Effect (`effect/unstable/ai`), speaking only to the model gateway — so a
+  harness agent runs on whatever tier the channel policy and the user's profile
+  resolve to, and is metered like everything else.
+- Tool layer reuses what exists: workspace FS + search, git/worktrees, checkpoints,
+  the MCP toolkit (including the headless preview browser).
+- **Per-user customization (D17)**: each member owns one or more agent profiles —
+  persona/system prompt, default tier/model route, tool allowlist,
+  temperature/limits — bounded by owner policy (a user cannot grant their agent
+  tools, channels, or tiers the owner hasn't allowed). Profiles are the user's own
+  config, versioned like everything else.
+- Harness instances are Bot members with their own keypairs (§6), tagged
+  operated-for their user.
+
+V1 harness scope is deliberately tight: one solid agent loop with the existing tool
+set and per-user profiles — not a plugin marketplace.
 
 ### Native Silent Mesh harness
 
@@ -302,34 +368,47 @@ client reuses everything below the view layer:
 - **`MeshSync`** — libgit2-based clone/pull/push of channel repos into the vault,
   plus the signed-event offline outbox.
 - **`MeshIntelligence`** — bundled open models (D19): whisper.cpp for voice-to-text,
-  a llama.cpp/MLX-served small model for offline summarization and translation.
-  Weights are fetched on first run (from the owner's server blob store, not a
-  third party) and stored in the vault; the model lineup is upgradable
-  independently of app releases. All of it runs fully offline. This stack also
-  ports to Linux clients if those ever happen.
+  a llama.cpp/MLX-served small model for offline summarization, translation, and
+  the **client-side Prompt Copilot** (§9) — voice intent → refined prompt →
+  clarifying questions → job queued in the offline outbox. Client-local is the only
+  offline mode (D21); when online the same copilot experience can ride the server
+  GPUs instead. Weights are fetched on first run (from the owner's server blob
+  store, not a third party) and stored in the vault; the model lineup is upgradable
+  independently of app releases. This stack also ports to Linux clients if those
+  ever happen.
 - **UI**: Slack-like sidebar (channels → unread/mention badges), channel view
   (stream + threads), thread view (T3's turn/approval/diff semantics), file browser,
-  artifact viewer with selection/comment/regenerate, sync & conflict UI, member/ACL
-  admin, and usage/metering dashboards for the owner.
+  artifact viewer with selection/comment/regenerate, the prompt-copilot surface
+  (push-to-talk intent capture, refinement dialogue, job queue with routing
+  visibility), sync & conflict UI, member/ACL admin, vendor-subscription linking,
+  and usage/metering dashboards for the owner.
 
 Since the web console is removed (D10), the **admin CLI is the fallback surface**
 (headless server management, recovery, backups) and the Swift app carries the
 owner-facing admin UI.
 
-## 11. Privacy posture — and its two controlled egresses
+## 11. Privacy posture — tiered, channel-enforced egress
 
 No third-party service is in the loop: no Clerk, no Cloudflare, no telemetry, no
 update pings. Data exists in exactly two places: the Linux server (owner-managed
 disk; LUKS recommended) and client vaults (encrypted, biometric-gated).
 
-Exactly two egress paths exist, both owner-controlled and both metered through the
-gateway:
+Inference egress is governed entirely by the tier system (§9), enforced per channel
+by the gateway router:
 
-1. **Vendor harness APIs** (Anthropic / OpenAI / xAI) — active only in channels
-   where the owner admits those Bot members.
-2. **The remote inference provider** — active only for agent profiles routed to it;
-   key held server-side.
+1. **Owned tier — zero egress.** Client-local and server-GPU inference never leaves
+   owner hardware. `owned-only` channels guarantee this for all agent activity,
+   from v1 (D18/D24).
+2. **Private tier — attested egress.** The TEE provider receives ciphertext into an
+   attested enclave; the gateway verifies attestation before sending. Trust rests
+   on hardware attestation rather than provider policy — stated plainly rather than
+   glossed.
+3. **Open tier — vendor egress on the member's own account.** Claude/Codex/Grok
+   traffic flows under each member's personal subscription (D23), only in channels
+   whose policy is `open`, and only for members who linked an account. Per-user
+   credential isolation means one member's data is never processed under another's
+   vendor account.
 
-Channels flagged **airgapped** use neither: their agents run exclusively on the
-server's local GPUs, so nothing leaves the owner's infrastructure — available from
-v1 (D18).
+The channel policy is the owner's single lever: set a channel `owned-only` or
+`private` and no member, agent profile, or copilot routing decision can leak its
+content below that line.

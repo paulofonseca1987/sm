@@ -72,35 +72,47 @@ in a worktree, a checkpoint event appears, the human approves a tool call, the
 result is pushed, and the push event shows in the stream. A non-member sees none
 of it; a member with read-only ACL on that folder gets their push rejected.
 
-## Phase 3 — Model plane: gateway, local models, native harness
+## Phase 3 — Model plane: tiers, gateway, copilot, native harness
 
 Silent Mesh's own identity (architecture.md §9). Runs on the relay + agent
 foundations of Phase 2; the Swift client (Phase 4) can start in parallel once the
 Phase 2 protocol has stabilized.
 
-- **Model gateway**: internal OpenAI- and Anthropic-compatible endpoints; router;
-  per-request attribution `(user, agent, channel, thread, model, backend)` with
-  token accounting tables + usage projections; owner-settable per-user budgets.
+- **Model gateway + privacy tiers (D21/D24)**: internal OpenAI- and
+  Anthropic-compatible endpoints; tier-aware router (owned / private / open);
+  channel privacy policy enforcement (a route below the channel's tier is refused
+  at the gateway, not by convention); per-request attribution
+  `(user, agent, channel, thread, model, tier, backend)` with token accounting
+  tables + usage projections; owner-settable per-user budgets.
 - **Local serving on the 2× RTX 4060 8 GB GPUs**: stack spike (llama.cpp server vs
   vLLM vs Ollama), model lineup selection within the ~7–14B Q4–Q8 envelope
-  (+ embeddings), weights under `models/`, health/VRAM monitoring.
-- **Remote inference provider**: single provider abstraction, server-held key,
-  routed and metered through the gateway.
-- **Vendor proxying**: route Claude/Codex/Grok CLI traffic through the gateway via
-  base-URL overrides where auth allows; fall back to harness-reported usage for
-  subscription-auth setups (flagged as self-reported in metering).
+  (+ embeddings, + a server-side whisper for voice jobs arriving from clients),
+  weights under `models/`, health/VRAM monitoring.
+- **TEE inference provider (D22)**: provider spike (attestation model, GPU TEE
+  maturity, model lineup); gateway integration = verify attestation evidence, then
+  send; metered like every other backend.
+- **Per-user vendor subscriptions (D23)**: member-linked Claude/Codex/Grok logins
+  via each CLI's native auth flow, stored per member in the secret store with
+  strict isolation; agents operated-for a user run only under that user's
+  subscription; usage metered from harness-reported counts (self-reported flag).
 - **Native harness v1**: Effect-based agent loop against the gateway; tool layer
   from the existing workspace/git/MCP toolkits; per-user agent profiles (persona,
-  model route, tool allowlist, limits) bounded by owner policy; harness instances
-  as Bot members with their own keypairs.
-- **Airgapped channels (D18)**: channel policy flag restricting agents to
-  local-backend models; enforced in the gateway router.
+  tier/model route, tool allowlist, limits) bounded by owner policy; harness
+  instances as Bot members with their own keypairs.
+- **Prompt Copilot (server-side) + inference queue (D25)**: copilot loop on the
+  server GPUs — file-context retrieval within ACL scope, prompt refinement,
+  clarifying-question dialogue, route proposal (complexity × channel policy × user
+  preference); inference-job events (queued/dispatched/completed kinds); dispatch
+  creates or continues work threads through normal orchestration.
 
-**Exit**: a member chats with their personalized harness agent in an airgapped
-channel backed by a local model — with the server's WAN disconnected — and the full
-loop works (thread, tools, checkpoint, push). Reconnect WAN: the same profile
-re-routed to the remote provider works identically. The owner's usage query shows
-per-user token totals broken down by backend, including vendor-harness usage.
+**Exit**: in an `owned-only` channel with the server's WAN disconnected, a member
+speaks a rough request; the copilot (server GPUs) refines it, asks one clarifying
+question, and queues the job; the harness agent completes it on a local model
+(thread, tools, checkpoint, push all work). Reconnect WAN: the same request in a
+`private` channel routes to the TEE provider after attestation, and in an `open`
+channel to the member's own Claude subscription. A route below a channel's tier is
+refused by the gateway. The owner's usage query shows per-user totals broken down
+by tier and backend.
 
 ## Phase 4 — Swift macOS client MVP
 
@@ -128,14 +140,18 @@ unreadable outside the app.
   background sync; conflict surfacing as ordinary merges in UI.
 - Offline outbox: signed events queued locally (valid because client-signed),
   replayed on reconnect; offline edits are local commits.
-- `MeshIntelligence` (D19): bundled open models — whisper.cpp voice-to-text, a
-  llama.cpp/MLX small model for offline summarize/translate. Weights fetched on
-  first run from the owner's server blob store (no third party) into the vault;
-  quality spike picks the lineup.
+- `MeshIntelligence` (D19/D25): bundled open models — whisper.cpp voice-to-text, a
+  llama.cpp/MLX small model for offline summarize/translate — plus the
+  **client-side Prompt Copilot**: push-to-talk intent capture, local refinement and
+  clarifying questions against synced files, jobs signed into the offline outbox
+  (client-local is the only offline mode; online, the copilot can ride the server
+  GPUs instead). Weights fetched on first run from the owner's server blob store
+  (no third party) into the vault; quality spike picks the lineup.
 
 **Exit**: pull the network cable — browse, edit, record-and-transcribe a voice
-note, summarize a doc; reconnect — commits push, events replay, conflicts (one
-seeded deliberately) resolve through the UI.
+note, summarize a doc, and speak a work request that the copilot refines into a
+queued job; reconnect — commits push, events replay, the queued job dispatches to
+the right tier, and conflicts (one seeded deliberately) resolve through the UI.
 
 ## Phase 6 — Artifact viewer and durable comments
 
@@ -169,8 +185,10 @@ history intact.
 | Effect v4 is beta; upstream T3 moves fast | pin versions at fork point; cherry-pick upstream server fixes deliberately, not continuously |
 | Full relay compatibility is the maximal-cost Nostr option | Phases 1–2 build it beside the working engine; test clients validate before any GUI depends on it |
 | No GUI between Phase 0 and Phase 4 ("dark period") | accepted by decision D10; CLI harness + scripted clients keep every phase demonstrable |
-| 16 GB total VRAM caps local model quality (~7–14B class) | airgapped channels knowingly trade capability for privacy; remote provider and vendor harnesses cover the high end; GPU upgrade changes nothing architecturally |
-| Proxying vendor subscription (OAuth) auth through the gateway may be fragile | metering falls back to harness-reported usage, flagged as self-reported |
+| 16 GB total VRAM caps local model quality (~7–14B class) | owned-tier channels knowingly trade capability for privacy; TEE provider and vendor subscriptions cover the high end; GPU upgrade changes nothing architecturally |
+| TEE inference is a young market (attestation verification, GPU TEE maturity, model availability) | provider abstraction keys on attestation-then-send; if no provider passes the Phase 3 spike, `private`-tier complex tasks degrade to server GPUs until one does |
+| Per-user vendor subscription auth on the server (OAuth flows, token refresh, ToS drift) | mirrors Buzz's proven pattern; credentials isolated per member; metering is self-reported by design, not proxied |
+| Copilot quality on small models (refinement, clarifying questions, routing) | it drafts and routes, humans confirm before dispatch; routing rules are policy code, not model output, so a weak copilot degrades UX, never privacy |
 | Own-harness scope creep | v1 = one agent loop + existing tools + per-user profiles; plugins/skills deferred to Phase 7 |
 | Git can't hide paths within one repo | scoped out of v1 explicitly (architecture §6); channel granularity is the read boundary, filtered mirrors in Phase 7 |
 | secp256k1 keys can't live in the Secure Enclave | SE-wrapped master key + Keychain biometric access control (architecture §10); documented rather than discovered late |
@@ -179,16 +197,21 @@ history intact.
 
 ## Open questions (deliberately deferred)
 
-1. Remote inference provider choice (OpenRouter / Together / Fireworks / direct)
-   and initial hosted-model lineup.
+1. TEE inference provider choice (attestation model, GPU TEE stack, hosted-model
+   lineup, pricing) — Phase 3 spike.
 2. Local serving stack (llama.cpp server / vLLM / Ollama) and model lineup for the
    2× 8 GB GPUs — Phase 3 spike.
-3. Metering policy detail: budgets vs reporting-only, per-user vs per-channel caps,
+3. Copilot model choice (shared or distinct between client and server variants)
+   and how much routing intelligence lives in the model vs in policy code —
+   Phase 3/5 spikes.
+4. Inference-queue semantics: retention of undispatched jobs, cancellation,
+   re-routing when a channel's policy changes while a job is queued.
+5. Metering policy detail: budgets vs reporting-only, per-user vs per-channel caps,
    what the non-owner members get to see.
-4. Harness customization surface for v1 (persona + model route + tool allowlist is
-   the baseline; anything more waits for Phase 7).
-5. Vault implementation (APFS encrypted sparse bundle vs file-level crypto) —
+6. Harness customization surface for v1 (persona + tier/model route + tool
+   allowlist is the baseline; anything more waits for Phase 7).
+7. Vault implementation (APFS encrypted sparse bundle vs file-level crypto) —
    Phase 4 spike.
-6. Client local-model lineup (which whisper size, which small LLM) — Phase 5
+8. Client local-model lineup (which whisper size, which small LLM) — Phase 5
    quality spike.
-7. Forum-style channels (Buzz kinds 45001/45003) — not in v1.
+9. Forum-style channels (Buzz kinds 45001/45003) — not in v1.
