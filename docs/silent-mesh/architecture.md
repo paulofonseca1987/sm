@@ -40,6 +40,7 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D24 | Channel privacy policy | Every channel declares a minimum privacy tier — e.g. a channel can forbid non-private inference entirely (generalizes D18's airgapped flag) |
 | D25 | Prompt Copilot | A private local model (client machine, or server GPUs when online) that sees the task's files, takes voice or text intent, refines the prompt, asks clarifying questions, and queues the job for the most adequate model within channel policy |
 | D26 | Immutable channel tier | A channel's privacy tier is **fixed at creation and never changes**. Moving work to a different tier = the **owner (and only the owner) clones the channel** with a new tier — the repo forks, the conversation stays behind |
+| D27 | Thread forking | **Any member can clone a thread** — at its head or at any checkpoint — into a new variation with its own branch + worktree in the same channel, like branching a worktree. Inherited conversation is shown by reference to the origin thread; variations merge back through normal git flow |
 
 ## 2. The core mapping
 
@@ -209,6 +210,16 @@ starts with fresh data, no migration of legacy rows is needed.
 - Each channel owns a bare repo: `repos/<channelId>.git`. Threads get worktrees off
   it (existing `vcs.createWorktree` machinery). Turn checkpoints stay as hidden git
   refs (existing `checkpointing/**`).
+- **Thread forking (D27)**: any member can clone a thread — at its head or rewound
+  to any checkpoint — to try a different variation on the work. A fork is cheap by
+  construction: a new branch + worktree off the source thread's state at the fork
+  point, plus a new thread whose fork event references the origin. Inherited
+  conversation is *displayed by reference* (clients render the shared prefix from
+  the origin thread, read-only up to the fork point; the agent receives it as
+  context) — nothing is re-signed or copied. Unlike channel cloning this needs no
+  special permission: it stays inside the same channel, tier, and ACLs, so no
+  boundary is crossed. Sibling variations sit side by side like branches; the one
+  that wins merges back through the normal git flow, and the others archive.
 - The server exposes `GET /git/<channel>/info/refs`, `POST /git/<channel>/git-upload-pack`,
   `POST /git/<channel>/git-receive-pack`, authenticated with NIP-98, authorized by
   membership + write ACLs in a pre-receive policy hook. A push emits a git event into
@@ -393,7 +404,8 @@ client reuses everything below the view layer:
   independently of app releases. This stack also ports to Linux clients if those
   ever happen.
 - **UI**: Slack-like sidebar (channels → unread/mention badges), channel view
-  (stream + threads), thread view (T3's turn/approval/diff semantics), file browser,
+  (stream + threads), thread view (T3's turn/approval/diff semantics, plus
+  fork-at-checkpoint and a variations switcher across sibling forks), file browser,
   artifact viewer with selection/comment/regenerate, the prompt-copilot surface
   (push-to-talk intent capture, refinement dialogue, job queue with routing
   visibility), sync & conflict UI, member/ACL admin, vendor-subscription linking,

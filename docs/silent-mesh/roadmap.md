@@ -56,6 +56,11 @@ Silent Mesh's domain model becomes real.
 - Work threads as event kinds mapped onto the existing Thread machinery: create
   thread from a stream message, thread turns/activities/approvals/proposed-plans/
   checkpoints all become 47xxx events; worktrees re-parented to channel repos.
+- **Thread forking (D27)**: any member clones a thread at head or at any
+  checkpoint → new branch + worktree + thread with a fork event referencing the
+  origin; inherited conversation rendered by reference (agent gets it as context),
+  never copied or re-signed; sibling variations listed against the origin; merge
+  back via the normal git flow.
 - Agents as Bot members: keypair provisioning in the secret store, per-channel
   membership, @mention dispatch in streams (adapt `ProviderRuntimeIngestion` /
   `ProviderCommandReactor`), one in-flight prompt per channel stream (Buzz rule),
@@ -69,8 +74,10 @@ Silent Mesh's domain model becomes real.
 **Exit**: from two test clients — a human posts `@claude fix the parser` in a
 channel stream; the agent (its own key) replies in a thread, edits the channel repo
 in a worktree, a checkpoint event appears, the human approves a tool call, the
-result is pushed, and the push event shows in the stream. A non-member sees none
-of it; a member with read-only ACL on that folder gets their push rejected.
+result is pushed, and the push event shows in the stream. A second member forks
+that thread at an earlier checkpoint and drives a competing variation in its own
+worktree without disturbing the original. A non-member sees none of it; a member
+with read-only ACL on that folder gets their push rejected.
 
 ## Phase 3 — Model plane: tiers, gateway, copilot, native harness
 
