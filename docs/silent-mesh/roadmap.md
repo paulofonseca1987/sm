@@ -64,12 +64,15 @@ Silent Mesh's domain model becomes real.
 - **Thread lifecycle (D28)**: settled / snoozed / archived as signed lifecycle
   events (archive graduates from T3-nightly experimental to core); archived
   threads drop from default views, stay searchable; losing forks auto-archive.
-- **Personal channels + promotion (D29)**: personal channel auto-provisioned at
-  enrollment (tier picked during onboarding, more creatable at will); promotion
+- **Personal channels + promotion (D29/D30)**: personal channel auto-provisioned
+  at enrollment (tier picked during onboarding, more creatable at will); promotion
   transplants a private thread's branch state onto the target channel's repo as a
-  new thread + worktree with a promotion event (optional copilot summary — plain
-  text until Phase 3's copilot exists); private conversation never crosses;
-  explicit confirmation when the target tier is looser.
+  new thread + worktree with a promotion event; private conversation never
+  crosses. The **Privacy Gate scaffold is mandatory from day one** for
+  privacy-weakening movements: explicit review/confirm step with a
+  member-written summary and deterministic secret scanning of outgoing files —
+  local-model summarization and redaction suggestions arrive in Phase 3, the
+  offline client variant in Phase 5.
 - Agents as Bot members: keypair provisioning in the secret store, per-channel
   membership, @mention dispatch in streams (adapt `ProviderRuntimeIngestion` /
   `ProviderCommandReactor`), one in-flight prompt per channel stream (Buzz rule),
@@ -126,6 +129,12 @@ Phase 2 protocol has stabilized.
   clarifying-question dialogue, route proposal (complexity × channel policy × user
   preference); inference-job events (queued/dispatched/completed kinds); dispatch
   creates or continues work threads through normal orchestration.
+- **Privacy Gate assist (D30)**: server-GPU local models generate the promotion
+  summary from the private conversation and suggest redaction spans over
+  everything that would cross (paired with the deterministic scanners from
+  Phase 2); user-approved obfuscations applied to the outgoing copy only; gate
+  inference is pinned to the owned tier in the router — it can never route
+  remotely regardless of profile or channel settings.
 
 **Exit**: in an `owned-only` channel with the server's WAN disconnected, a member
 speaks a rough request; the copilot (server GPUs) refines it, asks one clarifying
@@ -135,7 +144,10 @@ question, and queues the job; the harness agent completes it on a local model
 channel to the member's own Claude subscription. A route below a channel's tier is
 refused by the gateway; changing a channel's tier is impossible, and the owner
 clones an `owned-only` channel into an `open` one (repo forked, fresh stream)
-while a non-owner's clone attempt is refused. The owner's usage query shows
+while a non-owner's clone attempt is refused. Promoting a private thread into an
+`open` channel triggers the Privacy Gate: a locally generated summary, flagged
+spans (model + scanners), and per-item obfuscation approval — with the gate's own
+inference verifiably never leaving owned hardware. The owner's usage query shows
 per-user totals broken down by tier and backend.
 
 ## Phase 4 — Swift macOS client MVP
@@ -165,13 +177,16 @@ unreadable outside the app.
   background sync; conflict surfacing as ordinary merges in UI.
 - Offline outbox: signed events queued locally (valid because client-signed),
   replayed on reconnect; offline edits are local commits.
-- `MeshIntelligence` (D19/D25): bundled open models — whisper.cpp voice-to-text, a
-  llama.cpp/MLX small model for offline summarize/translate — plus the
-  **client-side Prompt Copilot**: push-to-talk intent capture, local refinement and
-  clarifying questions against synced files, jobs signed into the offline outbox
-  (client-local is the only offline mode; online, the copilot can ride the server
-  GPUs instead). Weights fetched on first run from the owner's server blob store
-  (no third party) into the vault; quality spike picks the lineup.
+- `MeshIntelligence` (D19/D25/D30): bundled open models — whisper.cpp
+  voice-to-text, a llama.cpp/MLX small model for offline summarize/translate —
+  plus the **client-side Prompt Copilot**: push-to-talk intent capture, local
+  refinement and clarifying questions against synced files, jobs signed into the
+  offline outbox (client-local is the only offline mode; online, the copilot can
+  ride the server GPUs instead) — plus the **offline Privacy Gate**: when
+  promoting while offline, summary and redaction suggestions run client-local and
+  the reviewed promotion queues in the outbox. Weights fetched on first run from
+  the owner's server blob store (no third party) into the vault; quality spike
+  picks the lineup.
 
 **Exit**: pull the network cable — browse, edit, record-and-transcribe a voice
 note, summarize a doc, and speak a work request that the copilot refines into a
@@ -214,6 +229,7 @@ history intact.
 | TEE inference is a young market (attestation verification, GPU TEE maturity, model availability) | provider abstraction keys on attestation-then-send; if no provider passes the Phase 3 spike, `private`-tier complex tasks degrade to server GPUs until one does |
 | Per-user vendor subscription auth on the server (OAuth flows, token refresh, ToS drift) | mirrors Buzz's proven pattern; credentials isolated per member; metering is self-reported by design, not proxied |
 | Copilot quality on small models (refinement, clarifying questions, routing) | it drafts and routes, humans confirm before dispatch; routing rules are policy code, not model output, so a weak copilot degrades UX, never privacy |
+| Privacy Gate redaction assist misses secrets (small-model false negatives) | model suggestions are paired with deterministic secret scanners; the human review is the decision point, the model only assists; audit records gate outcomes without private content |
 | Own-harness scope creep | v1 = one agent loop + existing tools + per-user profiles; plugins/skills deferred to Phase 7 |
 | Git can't hide paths within one repo | scoped out of v1 explicitly (architecture §6); channel granularity is the read boundary, filtered mirrors in Phase 7 |
 | secp256k1 keys can't live in the Secure Enclave | SE-wrapped master key + Keychain biometric access control (architecture §10); documented rather than discovered late |
@@ -240,4 +256,7 @@ history intact.
    Phase 4 spike.
 8. Client local-model lineup (which whisper size, which small LLM) — Phase 5
    quality spike.
-9. Forum-style channels (Buzz kinds 45001/45003) — not in v1.
+9. Privacy Gate obfuscation mechanics: placeholder tokens vs generalized rewrites,
+   and whether file redactions rewrite only the transplanted copy's history or
+   also its future merges back.
+10. Forum-style channels (Buzz kinds 45001/45003) — not in v1.

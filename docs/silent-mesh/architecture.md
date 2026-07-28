@@ -43,6 +43,7 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D27 | Thread forking | **Any member can clone a thread** — at its head or at any checkpoint — into a new variation with its own branch + worktree in the same channel, like branching a worktree. Inherited conversation is shown by reference to the origin thread; variations merge back through normal git flow |
 | D28 | Thread archiving | T3's thread archiving (experimental in current T3 nightlies) becomes a **core lifecycle state** alongside settled/snoozed — signed lifecycle events; archived threads leave default views but stay searchable; losing fork variations archive rather than delete |
 | D29 | Personal channels + promotion | Every member gets a **private personal channel** (membership of one, plus their agents) to organize their own threads and files, and can **promote** a private thread's work into a team channel — files transplant, the private conversation stays behind — where others review, comment, and fork it |
+| D30 | Privacy Gate | Any privacy-weakening movement (personal → team promotion, clone into a looser tier) passes a mandatory gate: **local models** (owned tier only) summarize the conversation, analyze outgoing content, and suggest what must stay private; the user reviews and approves obfuscations before the operation executes |
 
 ## 2. The core mapping
 
@@ -214,14 +215,28 @@ starts with fresh data, no migration of legacy rows is needed.
 - **Promotion (D29)**: a member promotes a private thread's work into a team
   channel they belong to. The thread's branch state (head or a chosen checkpoint)
   transplants onto the target channel's repo as a new thread + worktree, announced
-  by a promotion event in the target stream — with an optional copilot-drafted
-  summary of the work so far. The private conversation stays in the personal
-  channel: team members never gain access to origin events (ACL), so for them the
-  promoted thread starts from the files + summary, while the creator keeps a
-  private provenance link back. From there the team reviews, comments, and forks
-  it like any thread (D27). Promoting into a channel with a looser tier than the
-  personal channel requires explicit confirmation, since the content becomes
-  routable to looser inference backends.
+  by a promotion event in the target stream carrying a summary of the work so far.
+  The private conversation stays in the personal channel: team members never gain
+  access to origin events (ACL), so for them the promoted thread starts from the
+  files + summary, while the creator keeps a private provenance link back. From
+  there the team reviews, comments, and forks it like any thread (D27).
+- **Privacy Gate (D30)**: any movement that weakens the privacy assumption — a
+  personal → team promotion, an owner clone into a looser tier — must pass the
+  gate before it executes:
+  1. A **local model** (client-local when offline, server GPUs otherwise — owned
+     tier only, never a remote backend, because the content is still private at
+     this point) summarizes the private conversation into the promotion summary.
+  2. The same local pass, paired with **deterministic secret scanners**
+     (gitleaks-style patterns, entropy checks), analyzes everything that would
+     cross — summary and transplanted files — and flags spans that look private:
+     credentials, keys, personal data, internal names and hosts, context that
+     wasn't meant for the wider audience.
+  3. The user reviews the flags, accepts/rejects each suggested obfuscation, and
+     adds their own; accepted redactions are applied to the **outgoing copy only**
+     — the private originals are untouched.
+  4. Only after this explicit review does the operation execute. The audit log
+     records that the gate ran and the decision shape (counts, hashes) — never
+     the private content itself.
 - **Audit**: every action is already a signed event; the relay additionally keeps a
   Buzz-style hash-chained audit log so tampering with SQLite is evident.
 
@@ -304,7 +319,10 @@ channel** with the new tier:
 - the conversation does **not** transfer — signed events are authored against the
   original channel and cannot be re-signed, so the clone starts a fresh stream
   carrying a provenance link to its origin;
-- queued inference jobs never migrate; they are re-queued under the clone's policy.
+- queued inference jobs never migrate; they are re-queued under the clone's policy;
+- a clone into a **looser** tier passes the Privacy Gate (§6, D30) like any other
+  privacy-weakening movement — local analysis of the outgoing files, suggested
+  redactions, explicit review before the clone lands.
 
 Owner-only is deliberate: cloning is the single operation that can re-tier content
 (e.g. lifting formerly airgapped files into an `open` channel where vendors can see
@@ -434,8 +452,9 @@ client reuses everything below the view layer:
   promote-to-channel, and archive), archived-thread browsing, file browser,
   artifact viewer with selection/comment/regenerate, the prompt-copilot surface
   (push-to-talk intent capture, refinement dialogue, job queue with routing
-  visibility), sync & conflict UI, member/ACL admin, vendor-subscription linking,
-  and usage/metering dashboards for the owner.
+  visibility), the Privacy Gate review flow (generated summary, flagged spans,
+  per-item obfuscation approval), sync & conflict UI, member/ACL admin,
+  vendor-subscription linking, and usage/metering dashboards for the owner.
 
 Since the web console is removed (D10), the **admin CLI is the fallback surface**
 (headless server management, recovery, backups) and the Swift app carries the
