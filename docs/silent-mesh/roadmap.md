@@ -50,21 +50,29 @@ refusal to the agent; all four paths visible in the audit chain.
 
 The `sm-work` crate (architecture §7) plus channel↔repo semantics.
 
-- Channel = folder = repo (D5/D6): channel creation provisions and binds a forge
-  repo; channel privacy tier declared at creation, **immutable** (D24/D26), with
-  the owner-only clone operation (repo forked with history, membership copied,
-  fresh stream with provenance link) as the only re-tiering path.
+- **Role hierarchy (D42)**: workspace Owner/Admin layer added over Buzz's
+  per-channel roles (buzz-admin / moderation_authz extension points); Buzz's
+  channel Owner/Admin remapped to Channel Admin; Guest disabled; authority
+  enforcement for invites, team-channel creation, and Channel-Admin
+  appointment (agents & budgets enforcement follows those features in
+  Phase 3).
+- Channel = folder = repo (D5/D6): channel creation (Workspace Admin+, D42)
+  provisions and binds a forge repo; channel privacy tier declared at
+  creation, **immutable** (D24/D26), with the owner-only clone operation (repo
+  forked with history, membership copied, fresh stream with provenance link)
+  as the only re-tiering path.
 - Work threads as 47xxx kinds: thread bound to a worktree on the channel repo;
   per-turn checkpoints (hidden refs); diff/revert; plan-then-execute mode;
   buzz-acp agent workspaces aligned onto thread worktrees.
 - **Task framing (D40)**: threads launch with goal, optional deadline, and DRI
   (human or agent); overdue notices tag the DRI in the stream.
-- **Thread state machine (D41)**: open ⇄ snoozed → ready → closed → archived,
-  with owner reopen; agent recommendations (open / metadata / done) as
+- **Thread state machine (D41/D42)**: open ⇄ snoozed → ready → closed →
+  archived, with reopen; agent recommendations (open / metadata / done) as
   first-class inert-until-confirmed events; authority enforcement — any human
-  opens and edits metadata, **only the owner closes/archives** (policy knob,
-  owner-only default; member sovereignty in personal channels); sibling-fork
-  archiving batched into the winner's close flow.
+  opens and edits metadata, **Channel Admins close/archive in their channel,
+  the Owner anywhere** (policy knob; members implicitly Channel Admin of
+  their personal channels); sibling-fork archiving batched into the winner's
+  close flow.
 - **Canonicalization (D38/D40)**: the `canon/` convention on every channel
   repo; closing a thread *with canonicalization* merges its output into the
   canonical layer and archives the thread (structural mechanics here;
@@ -80,9 +88,11 @@ The `sm-work` crate (architecture §7) plus channel↔repo semantics.
 parser`, deadline, DRI = the claude agent); the agent works in a worktree, a
 checkpoint event appears, a supervised tool call is approved, the push event
 lands in the stream; the agent posts a done-recommendation, which changes
-nothing until the **owner closes the thread choosing canonicalization** —
-output merges into `canon/`, the thread archives. A non-owner's close attempt
-is refused; a member's metadata edit (new deadline) succeeds. A second member
+nothing until the **Channel Admin closes the thread choosing
+canonicalization** — output merges into `canon/`, the thread archives. A plain
+member's close attempt is refused; that member's metadata edit (new deadline)
+succeeds; a Workspace Admin creates a channel and appoints its Channel Admin,
+but their seal attempt is refused (owner-only). A second member
 forks at an earlier checkpoint and drives a variation; closing the winner
 offers sibling archiving. A member promotes (and closes) a personal-channel
 thread through the gate scaffold — files and summary arrive, conversation
@@ -190,13 +200,18 @@ phases produce.
   channel triggers update-proposal work threads in affected channels (never
   silent edits); proposals from stricter sources pass a batched Privacy Gate
   with seals enforced.
-- **Dispute lifecycle (D39)**: contradiction detection (extractor +
+- **Dispute lifecycle (D39/D42)**: contradiction detection (extractor +
   human/agent flagging) → dispute event with both claims + provenance →
-  escalation to the privileged decider (owner, or owner-designated steward
-  with read access to all sources) → signed decision event → propagation:
-  wiki records the chosen value, correction proposals open everywhere the
-  losing value appears.
-- Steward designation (per channel/domain) in the admin surfaces.
+  escalation to the Channel Admin(s) of the affected channel, or a Workspace
+  Admin / the Owner for cross-channel disputes (decider must read all
+  sources) → signed decision event → propagation: the winning canon records
+  the value, correction proposals open everywhere the losing value appears.
+- **Public wiki (D43)**: the sm-publish pipeline — select canon pages →
+  Workspace Admin/Owner approval → Privacy Gate + seals at maximum
+  strictness → static-site export with its own public search index → push to
+  the separate internet-facing host. Publish, update, and unpublish flows in
+  the admin surfaces (unpublish removes from the site; the honest caveat that
+  the internet may have cached it is stated in the UI).
 
 **Exit**: two channels' canons carry contradictory facts; the service raises a
 dispute; the designated steward (who can read both sources) decides B; the
@@ -205,7 +220,10 @@ proposal appears in the channel whose canon still says A; the cross-canon wiki
 view and search show the reconciled fact with provenance; a non-member of a
 private source channel sees neither that canon's contribution nor its
 existence. Separately: a completed task thread's output is distilled into its
-channel's canon with a provenance link back to the thread.
+channel's canon with a provenance link back to the thread. And: an approved
+canon page publishes to the public static site with sealed values absent,
+while the workspace server remains unreachable from the internet; a
+Workspace Admin publishes, a Channel Admin's publish attempt is refused.
 
 ## Phase 8 — Hardening and iOS
 
@@ -238,6 +256,7 @@ channel's canon with a provenance link back to the thread.
 | Deep-seal rewrites invalidate clones and SHA references | old→new SHA remap table; forced re-sync with vault purge; rare, owner-only, blast-radius-confirmed |
 | Postgres/Redis/MinIO ops vs T3's single process | inherited compose/Helm deploys with healthchecks; one Linux host is the supported profile |
 | Reconciliation noise (bad auto-updates, spurious disputes) | service auto-edits only pages it owns; everything else is a proposal; disputes require provenance on both claims; confidence thresholds tuned in Phase 8 |
+| Public publication is practically irrevocable (caches, archives) | it is the most-gated action in the system: explicit selection + Workspace Admin/Owner approval + gate and seals at maximum strictness + a separate host holding only published content |
 | The index as an ACL side-channel | retrieval scoping enforced server-side per query; embeddings owned-tier only; sealed content indexed as tokens; wiki inherits channel membership/tier like any content |
 
 ## Open questions (deliberately deferred)
@@ -263,7 +282,10 @@ channel's canon with a provenance link back to the thread.
 13. Knowledge-plane detail: embedding model + chunking strategy (Phase 3 spike,
     alongside the serving-stack spike), claim-extraction approach for dispute
     detection, `canon/` structure and ownership conventions (service-owned vs
-    human-owned pages), steward scoping granularity. (Canonicalization trigger
-    is settled by D41: the owner's close-with-canonicalize decision.)
-14. Close-authority loosening path (D41 policy knob): when and whether to
-    extend close/archive from owner-only to the DRI or channel Admins.
+    human-owned pages). (Canonicalization trigger settled by D41; dispute
+    routing settled by D42.)
+14. Close-authority loosening path (D41/D42 policy knob): when and whether to
+    extend close/archive from Channel Admins + Owner to DRIs.
+15. Public host choice and publish mechanics (D43): static host (own VPS vs
+    Pages-style vs CDN), domain, deploy transport from the VPN'd server to the
+    public host, and publish cadence.

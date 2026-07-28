@@ -22,14 +22,14 @@ codebases, D33 re-decided the foundation. **All D1–D32 product semantics survi
 | D1 | Base | ~~Fork of the T3 Code monorepo~~ *(superseded by D33)* |
 | D2 | Identity | Nostr identity like Buzz: every human and agent has a keypair; every action is a signed event *(now inherited)* |
 | D3 | Nostr depth | **Full relay wire compatibility** *(now inherited — this was the maximal-cost item on the T3 base and is free on the Buzz base)* |
-| D4 | Team model | One community per server; channels with explicit membership; roles Owner / Admin / Member / Guest / Bot; owner controls per-user permissions and per-folder/file access *(roles/membership/tenancy inherited; folder ACLs new)* |
+| D4 | Team model | One community per server; channels with explicit membership; owner controls per-user permissions and per-folder/file access *(membership/tenancy inherited; folder ACLs new; role set finalized by D42 — Guest dropped)* |
 | D5 | Sidebar mapping | **Channel = folder on the server; LLM thread = Slack-style thread inside the channel** |
 | D6 | Repo topology | One git repository per channel *(implemented as a channel↔repo binding convention on Buzz's forge)* |
 | D7 | Channel conversation | Main message stream (kind 9) + branching LLM work threads *(stream inherited; work threads new)* |
 | D8 | Agent execution | Server-side only *(inherited — buzz-acp spawns agents as server-side child processes)* |
 | D9 | File sync | Git-native: clients sync channel repos through ACL-enforcing git endpoints; offline edits are local commits *(transport inherited; client sync new)* |
 | D10 | Clients | Native Swift/SwiftUI macOS app first, native iOS later; server is headless for us — inherited Buzz clients are **not shipped** (D36) |
-| D11 | Remote access | VPN only (LAN / Tailscale / WireGuard / SSH); no third-party relay services |
+| D11 | Remote access | VPN only (LAN / Tailscale / WireGuard / SSH); no third-party relay services. *The public wiki (D43) lives on a separate internet-facing host holding only already-published content — the workspace server stays dark* |
 | D12 | Server platform | Linux |
 | D13 | Client security | Files encrypted at rest on the client, accessible only inside the app; app lock via Face ID / Touch ID / PIN |
 | D14 | Offline | Synced files remain editable offline; local on-device models handle summarize, translate, and voice-to-text |
@@ -57,9 +57,11 @@ codebases, D33 re-decided the foundation. **All D1–D32 product semantics survi
 | D36 | Interim client | **CLI-only until the Swift MVP** (buzz-cli + scripted/test clients + admin CLI). Inherited Buzz clients are not shipped or supported, though the in-tree desktop app remains available as a developer debugging tool |
 | D37 | Indexing & retrieval | The server continuously runs an **indexing + embedding service** (FTS + vectors) over all workspace content so users and agents retrieve information fast. Embeddings are computed **exclusively on owned hardware** (embedding via remote backends is wholesale egress and is prohibited by design); every retrieval query is **ACL-scoped** to the requester's readable channels |
 | D38 | Canonical docs per channel | **Every channel is a knowledge channel** — no dedicated wiki channels. Each channel carries its own **canonical docs**: the current truth about its topic, living alongside its chat in the same repo. The workspace wiki is the **ACL-scoped union of all canons**, browsable wiki-style and searchable, with provenance. The service auto-maintains distilled canon it owns and opens **update proposals** elsewhere — never silent edits |
-| D39 | Dispute escalation | When sources disagree on a data point (A vs B), the service raises a **dispute** escalated to a member with the privilege to decide (owner by default; owner may designate stewards per channel/domain; the decider must be able to read all sources). The decision is a signed event, and the service **propagates the chosen value throughout** — canons updated, correction proposals opened wherever the losing value appears |
+| D39 | Dispute escalation | When sources disagree on a data point (A vs B), the service raises a **dispute** escalated to a member with the privilege to decide — *per D42: the Channel Admin(s) of the affected channel; cross-channel disputes go to a Workspace Admin or the Owner; the decider must be able to read all sources (the steward concept is folded into Channel Admin)*. The decision is a signed event, and the service **propagates the chosen value throughout** — canons updated, correction proposals opened wherever the losing value appears |
 | D40 | Thread = task | A work thread is launched **as a task**: a goal, an optional **deadline**, and a **DRI** (directly responsible individual — human or agent). When the thread completes (closed/archived), its output is **canonicalized** into the channel's canonical docs; overdue deadlines notify the DRI in the stream |
-| D41 | Thread states & authority | State machine: `open` (⇄ `snoozed`) → `ready` (done proposed) → `closed` (with or without canonicalization) → `archived`. **Any human** opens threads and edits task metadata — explicitly or by confirming an **agent recommendation**; agents only ever recommend. **Only a human closes/archives/distills; v1: only the owner** (close authority is a policy knob, shipped owner-only). Exception forced by ACLs: in personal channels the member holds close authority — the owner isn't a member there and cannot see them |
+| D41 | Thread states & authority | State machine: `open` (⇄ `snoozed`) → `ready` (done proposed) → `closed` (with or without canonicalization) → `archived`. **Any human** opens threads and edits task metadata — explicitly or by confirming an **agent recommendation**; agents only ever recommend. **Only a human closes/archives/distills** — *per D42: Channel Admins within their channel, the Owner anywhere* (the policy knob can later loosen to DRIs). In personal channels the member is implicitly the Channel Admin |
+| D42 | Role hierarchy | Exactly five levels. **Owner** (one per workspace): everything — and **all privacy-weakening operations (tier-loosening clones, seals, deep seals) exclusively**. **Workspace Admins**: members & invites; team-channel creation (tier within owner-set bounds) and Channel-Admin appointment; agents & budgets; public-publishing approval. **Channel Admins**: manage everything in their channel — membership, terminal thread transitions (D41), knowledge-dispute decisions (absorbing D39's steward). **Members**: belong to channels, access their data, open threads, edit task metadata. **Public**: not a login — the published static wiki (D43). Guest is dropped; Bot remains the agent role; in personal channels the member is implicitly Channel Admin |
+| D43 | Public wiki | Publishing is an **explicit act on selected canon pages**: Workspace Admin/Owner approval → Privacy Gate + seals at maximum strictness → **static-site export** (with its own public search index) pushed to a **separate internet-facing host**. Equivalent to the company's public website/datasheets. The workspace server remains VPN-only (D11); the public host holds only already-published content |
 
 ## 2. The core mapping
 
@@ -124,6 +126,9 @@ exactly those.
 8. **Knowledge plane** (D37–D39) — continuous indexing/embedding, ACL-scoped
    retrieval for humans and agents, the reconciled wiki, and dispute
    escalation — §12.
+9. **Public wiki pipeline** (D43) — approval-gated static export of selected
+   canon to a separate internet-facing host, plus the workspace-level role
+   hierarchy (D42) layered over Buzz's per-channel roles.
 
 ### Not shipped (kept in-tree, unbuilt — D35/D36)
 
@@ -161,7 +166,9 @@ The Buzz stack, single-host via compose, plus Silent Mesh's additive services:
                    │  │    envelopes · gateway scrub               (NEW)    │
                    │  ├─ sm-knowledge: FTS+vector index · wiki              │
                    │  │    reconciliation · dispute escalation     (NEW)    │
-                   │  └─ Prompt Copilot + inference job queue      (NEW)    │
+                   │  ├─ sm-publish: gate-checked static export ──────────► │──► public host
+                   │  │    (approved canon only, D43)              (NEW)    │    (separate, dark
+                   │  └─ Prompt Copilot + inference job queue      (NEW)    │     to workspace)
                    │                                                        │
                    │  Postgres+pgvector (events, projections, index)        │
                    │  Redis (fan-out)                                       │
@@ -198,12 +205,25 @@ git commits".
 ## 6. Team layer: identity, roles, ACLs
 
 Inherited: keypair identity, invites (wiring the currently-deferred side-effect
-handler if upstream hasn't), channel membership with Owner/Admin/Member/Guest/Bot,
-TOCTOU-safe membership checks on REQ and delivery, last-owner guards, moderation,
-audit chain, community isolation.
+handler if upstream hasn't), channel membership and role enforcement (Buzz's
+per-channel roles, remapped per D42), TOCTOU-safe membership checks on REQ and
+delivery, last-owner guards, moderation, audit chain, community isolation.
 
 Silent Mesh additions:
 
+- **Role hierarchy (D42)**: five levels. The **Owner** (one per workspace) can
+  do everything, and holds all privacy-weakening operations exclusively
+  (tier-loosening clones, seals, deep seals). **Workspace Admins** handle
+  members & invites, team-channel creation (choosing the immutable tier within
+  owner-set bounds) and Channel-Admin appointment, agents & budgets, and
+  public-publishing approval. **Channel Admins** manage everything inside
+  their channel — membership, terminal thread transitions (D41), dispute
+  decisions (§12). **Members** belong to channels and work in them. **Public**
+  is not a login: it is the published static wiki (D43). Guest is dropped
+  (Buzz's Guest role is disabled); Bot remains the agent role. Workspace-level
+  roles are an additive layer over Buzz's per-channel roles (buzz-admin /
+  moderation_authz are the extension points); Buzz's per-channel Owner/Admin
+  map to our Channel Admin.
 - **Channel = folder = repo (D5/D6)**: channel creation provisions and binds a
   repo on the forge; the binding is the unit of sync and ACL.
 - **Folder/file write ACLs (D4)**: the pre-receive policy hook gains file-path
@@ -230,7 +250,7 @@ The `sm-work` layer gives Buzz what T3 had and Buzz lacks:
 - **Fork (D27)**: any member, at head or any checkpoint → sibling variation,
   conversation inherited by reference, merge-back via normal git flow.
 - **Lifecycle (D28)**: settled / snoozed / archived as signed events; losing
-  variations archive.
+  variations archive via the winner's close flow (D41).
 - **Promotion (D29)** out of personal channels, through the Privacy Gate (D30).
 - **Task framing (D40)**: a thread is launched as a task — a **goal** (the
   brief), an optional **deadline**, and a **DRI** (human or agent member)
@@ -244,8 +264,8 @@ The `sm-work` layer gives Buzz what T3 had and Buzz lacks:
   open ⇄ snoozed
   open → ready      (done proposed — by the DRI, any member, or an agent
                      recommendation)
-  ready → closed    (human decision; v1: owner only. Choice at close:
-                     canonicalize or not)
+  ready → closed    (human decision; Channel Admin in their channel, Owner
+                     anywhere. Choice at close: canonicalize or not)
   open/ready → archived   (abandonment path, same authority as close)
   closed → archived (automatic storage state after close)
   archived → open   (owner reopen, audit-logged; existing canon stays —
@@ -257,24 +277,24 @@ The `sm-work` layer gives Buzz what T3 had and Buzz lacks:
   recommend, humans decide, and terminal transitions have the narrowest
   authority.**
 
-  | Action | Agent | Any member | Owner |
-  |---|---|---|---|
-  | Open thread | recommend | ✓ | ✓ |
-  | Edit goal / deadline / DRI | recommend | ✓ | ✓ |
-  | Snooze / unsnooze | recommend | ✓ | ✓ |
-  | Propose done (`ready`) | recommend | ✓ | ✓ |
-  | Close (± canonicalize) | ✗ | ✗ (v1) | ✓ |
-  | Archive / reopen | ✗ | ✗ (v1) | ✓ |
+  | Action | Agent | Member | Channel Admin | Owner |
+  |---|---|---|---|---|
+  | Open thread | recommend | ✓ | ✓ | ✓ |
+  | Edit goal / deadline / DRI | recommend | ✓ | ✓ | ✓ |
+  | Snooze / unsnooze | recommend | ✓ | ✓ | ✓ |
+  | Propose done (`ready`) | recommend | ✓ | ✓ | ✓ |
+  | Close (± canonicalize) | ✗ | ✗ | ✓ (their channel) | ✓ |
+  | Archive / reopen | ✗ | ✗ | ✓ (their channel) | ✓ |
 
   Agent recommendations are first-class events a human confirms with one
   action; unconfirmed recommendations change nothing. Close authority is a
-  **policy knob** shipped owner-only — loosening it later (to the DRI, or
-  channel Admins) is a config change, not a redesign. Two forced edge cases:
-  in **personal channels** the member holds close authority (the owner is not
-  a member and cannot see them); and **losing fork variations** are archived
-  through the owner's close flow on the winning variation — closing the winner
-  offers sibling archiving as a batch, keeping D28's "losers archive" inside
-  human authority.
+  **policy knob** shipped at Channel-Admin + Owner (D42) — loosening it later
+  (to DRIs) is a config change, not a redesign. Two edge cases handled: in
+  **personal channels** the member is implicitly the Channel Admin (the owner
+  is not a member and cannot see them); and **losing fork variations** are
+  archived through the close flow on the winning variation — closing the
+  winner offers sibling archiving as a batch, keeping D28's "losers archive"
+  inside human authority.
 - **Canonicalization (D38/D40)**: every channel repo carries a **canonical docs
   layer** — a conventional `canon/` area on the main branch holding the current
   truth about the channel's topic. Thread work lives on the thread's branch;
@@ -379,16 +399,27 @@ organizational memory:
   proposals carry only content Y's members may see: if X is stricter than Y,
   the proposed content passes the **Privacy Gate** with seals enforced as
   always.
-- **Disputes (D39)**: when canons or sources disagree about a data point
+- **Disputes (D39/D42)**: when canons or sources disagree about a data point
   (A vs B) — the extractor detects a contradiction, or a human/agent flags
   one — the service raises a **knowledge dispute** event showing both claims
-  with provenance. It escalates to a member with the privilege to decide: the
-  owner by default, or a **steward** the owner designates per channel/domain;
-  the decider must have read access to every source involved. The decision is
-  a **signed event**; the service then propagates it throughout — the winning
-  canon records the value (with the dispute + decision linked for the record),
-  and correction proposals open in every channel still carrying the losing
-  value. Dispute → decision → propagation is a fully auditable chain.
+  with provenance. It escalates to the **Channel Admin(s)** of the affected
+  channel; disputes spanning channels go to a **Workspace Admin or the
+  Owner** — in every case the decider must have read access to all sources
+  involved. The decision is a **signed event**; the service then propagates it
+  throughout — the winning canon records the value (with the dispute +
+  decision linked for the record), and correction proposals open in every
+  channel still carrying the losing value. Dispute → decision → propagation is
+  a fully auditable chain.
+- **Public wiki (D43)**: publishing selected canon pages is an explicit,
+  approval-gated act — a Workspace Admin or the Owner approves, the content
+  passes the **Privacy Gate + seals at maximum strictness**, and `sm-publish`
+  exports it as a **static site** (own public search index) pushed to a
+  separate internet-facing host: the company's public documentation, website,
+  datasheets. The workspace server never faces the internet (D11); the public
+  host holds only already-published content, so compromising it reveals
+  nothing that wasn't already public. Honest caveat: publication is
+  practically irrevocable (caches, archives) — which is exactly why it is the
+  most-gated action in the system.
 
 ## 13. Swift macOS client (and the iOS path)
 
@@ -401,7 +432,9 @@ Privacy Gate). UI as decided: channels/streams/threads with fork/archive/promote
 metadata (goal, deadline, DRI) with a task-board view over threads, per-channel
 canon browsing, approvals, file browser, artifact viewer with seal-aware
 rendering and durable comments, gate review flow, workspace search + the
-cross-canon wiki view (§12), owner admin incl. usage dashboards.
+cross-canon wiki view (§12), and role-scoped admin surfaces (D42): members &
+invites, channels & channel admins, agents & budgets, usage dashboards,
+publish-to-public approval, and the owner's seal registry.
 
 Until it ships: **buzz-cli and scripted clients are the only supported surface**
 (D36).
