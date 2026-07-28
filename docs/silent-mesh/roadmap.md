@@ -136,11 +136,14 @@ Phase 2 protocol has stabilized.
   inference is pinned to the owned tier in the router — it can never route
   remotely regardless of profile or channel settings.
 - **Content Seals (D31)**: owner-managed seal registry (raw values encrypted in
-  the secret store); sealing rewrites content in place (commit swapping value for
-  token); tier-checked token resolution in relay rendering and gateway inference
-  paths; outbound scrubbing of sealed literals below their tier; gate integration
-  as mandatory, non-overridable redactions; a pre-receive lint rejecting
-  malformed or duplicated seal tokens.
+  the secret store); sealing triggers a **workspace-wide sweep** (a tokenizing
+  commit per channel repo + artifact scan); delivery-time redaction envelopes for
+  signed events below the seal's tier; **ingestion guards** — pre-receive and
+  event-ingestion scanning that auto-tokenizes new occurrences (server-side
+  matching only; raw literals never distributed); tier-checked token resolution
+  in relay rendering and gateway inference paths; outbound scrubbing of sealed
+  literals below their tier; gate integration as mandatory, non-overridable
+  redactions; a pre-receive lint rejecting malformed or duplicated seal tokens.
 
 **Exit**: in an `owned-only` channel with the server's WAN disconnected, a member
 speaks a rough request; the copilot (server GPUs) refines it, asks one clarifying
@@ -155,8 +158,10 @@ while a non-owner's clone attempt is refused. Promoting a private thread into an
 spans (model + scanners), and per-item obfuscation approval — with the gate's own
 inference verifiably never leaving owned hardware. A value sealed at `private`
 resolves inside the TEE-routed request, arrives scrubbed in any vendor-routed
-request, and renders as a placeholder in the `open` channel. The owner's usage
-query shows per-user totals broken down by tier and backend.
+request, and renders as a placeholder in the `open` channel; sealing it sweeps
+every existing occurrence workspace-wide, and pasting the raw value into an
+`open` channel's stream afterwards is caught at ingestion and auto-tokenized.
+The owner's usage query shows per-user totals broken down by tier and backend.
 
 ## Phase 4 — Swift macOS client MVP
 

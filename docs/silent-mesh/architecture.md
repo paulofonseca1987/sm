@@ -44,7 +44,7 @@ Decisions taken with the owner (2026-07-28), in the order they were made:
 | D28 | Thread archiving | T3's thread archiving (experimental in current T3 nightlies) becomes a **core lifecycle state** alongside settled/snoozed — signed lifecycle events; archived threads leave default views but stay searchable; losing fork variations archive rather than delete |
 | D29 | Personal channels + promotion | Every member gets a **private personal channel** (membership of one, plus their agents) to organize their own threads and files, and can **promote** a private thread's work into a team channel — files transplant, the private conversation stays behind — where others review, comment, and fork it |
 | D30 | Privacy Gate | Any privacy-weakening movement (personal → team promotion, clone into a looser tier) passes a mandatory gate: **local models** (owned tier only) summarize the conversation, analyze outgoing content, and suggest what must stay private; the user reviews and approves obfuscations before the operation executes |
-| D31 | Content Seals | The owner can select any word, value, or component and **seal it at a minimum tier**; the raw value is replaced by an opaque token and stored encrypted, and the system keeps it redacted — in rendering, inference, movement, and sync — in every context whose tier is looser than the seal's |
+| D31 | Content Seals | The owner can select any word, value, or component and **seal it at a minimum tier**; the raw value is replaced by an opaque token and stored encrypted, and the system keeps it redacted — in rendering, inference, movement, and sync — in every context whose tier is looser than the seal's. **A seal applies across the whole workspace**: every existing occurrence is swept, and new occurrences are caught at ingestion |
 
 ## 2. The core mapping
 
@@ -240,10 +240,16 @@ starts with fresh data, no migration of legacy rows is needed.
      the private content itself.
 - **Content Seals (D31)**: the owner selects any word, value, or component — an
   API key, a client's name, a salary table, a section of an artifact — and seals
-  it at a minimum tier. Sealing **rewrites the content in place**: a commit swaps
-  the selected value for an opaque token, and the raw value moves into the server
-  secret store, encrypted. From then on the token resolves to the real value only
-  in contexts at least as strict as the seal:
+  it at a minimum tier. **A seal is a workspace-global rule, not an annotation on
+  one location**: creating it triggers a sweep of every channel repo and artifact,
+  rewriting each occurrence — a commit per repo swaps the value for an opaque
+  token — while the raw value moves into the server secret store, encrypted.
+  Signed events can't be rewritten, so for them enforcement is at delivery: the
+  relay withholds the original content from contexts below the seal's tier and
+  serves a redaction envelope ("content sealed by owner") in its place, while
+  contexts at or above the tier receive the event untouched. From then on the
+  token resolves to the real value only in contexts at least as strict as the
+  seal:
   - **rendering** — the client viewer shows the value in a channel at or above
     the seal's tier, and an unresolvable `[sealed: label]` placeholder anywhere
     looser;
@@ -256,7 +262,13 @@ starts with fresh data, no migration of legacy rows is needed.
     downgrade;
   - **sync** — repo files carry tokens, never raw values, so a synced device
     holds nothing extra to leak; resolution happens in-app, tier-checked, on
-    demand.
+    demand;
+  - **ingestion** — new occurrences anywhere in the workspace are caught at the
+    chokepoints: git pre-receive and event ingestion scan incoming content
+    against the seal registry, auto-tokenize (the author re-signs the tokenized
+    event), and flag the attempt. Matching runs exclusively server-side — the
+    raw literals are never distributed to clients, which only ever learn a
+    seal's label and tier.
   Sealing and unsealing are owner-only, audit-logged actions; loosening a seal's
   tier is itself a privacy-weakening operation and passes the gate.
 - **Audit**: every action is already a signed event; the relay additionally keeps a
