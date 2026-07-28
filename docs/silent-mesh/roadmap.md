@@ -59,10 +59,16 @@ The `sm-work` crate (architecture §7) plus channel↔repo semantics.
   buzz-acp agent workspaces aligned onto thread worktrees.
 - **Task framing (D40)**: threads launch with goal, optional deadline, and DRI
   (human or agent); overdue notices tag the DRI in the stream.
+- **Thread state machine (D41)**: open ⇄ snoozed → ready → closed → archived,
+  with owner reopen; agent recommendations (open / metadata / done) as
+  first-class inert-until-confirmed events; authority enforcement — any human
+  opens and edits metadata, **only the owner closes/archives** (policy knob,
+  owner-only default; member sovereignty in personal channels); sibling-fork
+  archiving batched into the winner's close flow.
 - **Canonicalization (D38/D40)**: the `canon/` convention on every channel
-  repo; completing a thread merges its output into the canonical layer and
-  archives the thread (structural mechanics here; intelligent distillation
-  arrives with sm-knowledge in Phase 7).
+  repo; closing a thread *with canonicalization* merges its output into the
+  canonical layer and archives the thread (structural mechanics here;
+  intelligent distillation arrives with sm-knowledge in Phase 7).
 - **Thread forking (D27)**, **lifecycle incl. archive (D28)**, **personal
   channels + promotion (D29)** with the **Privacy Gate scaffold (D30)** —
   mandatory review/confirm with member-written summary + deterministic secret
@@ -73,12 +79,15 @@ The `sm-work` crate (architecture §7) plus channel↔repo semantics.
 **Exit**: from buzz-cli — a human launches a task thread (`goal: fix the
 parser`, deadline, DRI = the claude agent); the agent works in a worktree, a
 checkpoint event appears, a supervised tool call is approved, the push event
-lands in the stream, and on completion the thread's output canonicalizes into
-the channel's `canon/` and the thread archives. A second member forks at an
-earlier checkpoint, drives a variation, archives the loser. A member promotes a
-personal-channel thread through the gate scaffold — files and summary arrive,
-conversation doesn't. An overdue deadline tags the DRI in the stream. A
-read-only-ACL member's push is rejected; a non-member sees nothing.
+lands in the stream; the agent posts a done-recommendation, which changes
+nothing until the **owner closes the thread choosing canonicalization** —
+output merges into `canon/`, the thread archives. A non-owner's close attempt
+is refused; a member's metadata edit (new deadline) succeeds. A second member
+forks at an earlier checkpoint and drives a variation; closing the winner
+offers sibling archiving. A member promotes (and closes) a personal-channel
+thread through the gate scaffold — files and summary arrive, conversation
+doesn't. An overdue deadline tags the DRI in the stream. A read-only-ACL
+member's push is rejected; a non-member sees nothing.
 
 ## Phase 3 — Model plane: tiers, gateway, copilot, harness
 
@@ -254,5 +263,7 @@ channel's canon with a provenance link back to the thread.
 13. Knowledge-plane detail: embedding model + chunking strategy (Phase 3 spike,
     alongside the serving-stack spike), claim-extraction approach for dispute
     detection, `canon/` structure and ownership conventions (service-owned vs
-    human-owned pages), steward scoping granularity, and which thread states
-    trigger canonicalization (closed vs archived vs explicit).
+    human-owned pages), steward scoping granularity. (Canonicalization trigger
+    is settled by D41: the owner's close-with-canonicalize decision.)
+14. Close-authority loosening path (D41 policy knob): when and whether to
+    extend close/archive from owner-only to the DRI or channel Admins.

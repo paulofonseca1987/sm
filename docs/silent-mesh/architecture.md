@@ -59,6 +59,7 @@ codebases, D33 re-decided the foundation. **All D1–D32 product semantics survi
 | D38 | Canonical docs per channel | **Every channel is a knowledge channel** — no dedicated wiki channels. Each channel carries its own **canonical docs**: the current truth about its topic, living alongside its chat in the same repo. The workspace wiki is the **ACL-scoped union of all canons**, browsable wiki-style and searchable, with provenance. The service auto-maintains distilled canon it owns and opens **update proposals** elsewhere — never silent edits |
 | D39 | Dispute escalation | When sources disagree on a data point (A vs B), the service raises a **dispute** escalated to a member with the privilege to decide (owner by default; owner may designate stewards per channel/domain; the decider must be able to read all sources). The decision is a signed event, and the service **propagates the chosen value throughout** — canons updated, correction proposals opened wherever the losing value appears |
 | D40 | Thread = task | A work thread is launched **as a task**: a goal, an optional **deadline**, and a **DRI** (directly responsible individual — human or agent). When the thread completes (closed/archived), its output is **canonicalized** into the channel's canonical docs; overdue deadlines notify the DRI in the stream |
+| D41 | Thread states & authority | State machine: `open` (⇄ `snoozed`) → `ready` (done proposed) → `closed` (with or without canonicalization) → `archived`. **Any human** opens threads and edits task metadata — explicitly or by confirming an **agent recommendation**; agents only ever recommend. **Only a human closes/archives/distills; v1: only the owner** (close authority is a policy knob, shipped owner-only). Exception forced by ACLs: in personal channels the member holds close authority — the owner isn't a member there and cannot see them |
 
 ## 2. The core mapping
 
@@ -182,10 +183,11 @@ subject to membership.
 Silent Mesh adds its **47000–47999 block**: work-thread lifecycle (incl.
 settled/snoozed/archived), thread fork, thread promotion, turn/activity, proposed
 plan, checkpoint ref, artifact published, anchored comment, inference job
-queued/dispatched/completed, thread canonicalized, content seal, canon updated,
-knowledge dispute raised, knowledge decision, sync marker, ACL change notice,
-usage summary. Task metadata (goal, deadline, DRI, overdue notice) rides the
-thread-lifecycle kinds. Agent token-streaming uses ephemeral kinds (20000–29999); final messages
+queued/dispatched/completed, thread canonicalized, **thread recommendation**
+(agent-proposed open / metadata edit / done — inert until a human confirms),
+content seal, canon updated, knowledge dispute raised, knowledge decision, sync
+marker, ACL change notice, usage summary. Task metadata (goal, deadline, DRI,
+overdue notice) and state transitions (D41) ride the thread-lifecycle kinds. Agent token-streaming uses ephemeral kinds (20000–29999); final messages
 persist as one signed event. Approval kinds 46010/46011 are inherited names that
 we actually wire (§8).
 
@@ -235,15 +237,53 @@ The `sm-work` layer gives Buzz what T3 had and Buzz lacks:
   responsible for driving it to done. Overdue deadlines emit a notice into the
   channel stream tagging the DRI. An agent DRI drives the work itself; a human
   DRI drives the agents.
+- **Thread states & authority (D41)**: the lifecycle is a small, explicit
+  machine —
+
+  ```
+  open ⇄ snoozed
+  open → ready      (done proposed — by the DRI, any member, or an agent
+                     recommendation)
+  ready → closed    (human decision; v1: owner only. Choice at close:
+                     canonicalize or not)
+  open/ready → archived   (abandonment path, same authority as close)
+  closed → archived (automatic storage state after close)
+  archived → open   (owner reopen, audit-logged; existing canon stays —
+                     provenance is history, not state)
+  ```
+
+  `open` carries computed sub-signals (working / awaiting-approval / settled)
+  rather than extra states. Authority follows one principle: **agents
+  recommend, humans decide, and terminal transitions have the narrowest
+  authority.**
+
+  | Action | Agent | Any member | Owner |
+  |---|---|---|---|
+  | Open thread | recommend | ✓ | ✓ |
+  | Edit goal / deadline / DRI | recommend | ✓ | ✓ |
+  | Snooze / unsnooze | recommend | ✓ | ✓ |
+  | Propose done (`ready`) | recommend | ✓ | ✓ |
+  | Close (± canonicalize) | ✗ | ✗ (v1) | ✓ |
+  | Archive / reopen | ✗ | ✗ (v1) | ✓ |
+
+  Agent recommendations are first-class events a human confirms with one
+  action; unconfirmed recommendations change nothing. Close authority is a
+  **policy knob** shipped owner-only — loosening it later (to the DRI, or
+  channel Admins) is a config change, not a redesign. Two forced edge cases:
+  in **personal channels** the member holds close authority (the owner is not
+  a member and cannot see them); and **losing fork variations** are archived
+  through the owner's close flow on the winning variation — closing the winner
+  offers sibling archiving as a batch, keeping D28's "losers archive" inside
+  human authority.
 - **Canonicalization (D38/D40)**: every channel repo carries a **canonical docs
   layer** — a conventional `canon/` area on the main branch holding the current
   truth about the channel's topic. Thread work lives on the thread's branch;
-  when the thread completes, its output **merges into the canonical layer**
-  (the same merge-back flow, now with organizational meaning) and
-  `sm-knowledge` distills the canonical doc updates with provenance links back
-  to the thread. The thread then archives (D28). Chat and canon live in one
-  place: joining a channel gives you the conversation *and* the accumulated
-  truth of its topic.
+  closing a thread **with canonicalization** merges its output into the
+  canonical layer (the same merge-back flow, now with organizational meaning)
+  and `sm-knowledge` distills the canonical doc updates with provenance links
+  back to the thread; closing without it just archives. Chat and canon live in
+  one place: joining a channel gives you the conversation *and* the
+  accumulated truth of its topic.
 - Buzz's existing agent workspace convention (OUTBOX/, REPOS/) is aligned with
   worktree binding so buzz-acp agents operate inside the thread's worktree.
 
